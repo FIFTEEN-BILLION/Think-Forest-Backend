@@ -142,9 +142,11 @@ pyproject.toml           ruff · pytest 설정
 - [ ] Python 3.11+ 설치 후 venv 재생성, `CLAUDE.md` 와 실제 버전 일치
 
 ### 영속화 (현재 전부 인메모리)
-- [ ] 발화 저장소를 실제 DB 로 (`services/storage.py` 인터페이스는 고정됨)
+- [ ] 발화 저장소를 **PostgreSQL** 로 (`services/storage.py` 인터페이스는 고정됨).
+  후보: SQLAlchemy 2.x + Alembic, 비동기 드라이버(`asyncpg`). `DATABASE_URL` 환경변수 추가.
+  마스킹된 텍스트·가린 항목 종류·저장 시각만 컬럼으로. 원문·이름·연락처는 저장 금지.
+- [ ] 보관기간(30/90/180일) 아이별 설정 저장, 만료 파기 배치(또는 `DELETE ... WHERE at < now() - interval`)
 - [ ] 호출/차단 로그 영속화 또는 관측 도구 연동
-- [ ] 보관기간 설정(30/90/180일)을 아이별로 저장, 만료 파기 배치
 
 ### 안전 강화
 - [x] 금칙어 우회 표현(띄어쓰기·구두점·반복문자) 대응 — 정규화 후 매칭
