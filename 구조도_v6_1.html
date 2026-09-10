@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>자람마을 앱 구조도</title>
+<style>html{color-scheme:light dark}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<!-- 자람마을 앱 상세 구조도 v6 -->
+</head>
+<body>
+<title>자람마을 앱 구조도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&display=swap">
+<style>
+  :root{
+    --paper-0:#FCF8EF; --paper-1:#F5EEDD; --paper-2:#EDE2C8; --surface:#FFFFFF;
+    --ink-900:#251A3D; --ink-700:#3D3157; --ink-500:#6B6084; --ink-300:#9A92AC;
+    --line:#E3D6B8; --line-strong:#D2C29B;
+    --violet:#4B3A82; --teal:#2E7C68; --coral:#B9503F; --gold:#B57C16; --slate:#5B5470;
+    --wire:#B9AE93;
+    --font-display:'Gowun Batang','Noto Serif KR',Georgia,serif;
+    --font-body:'Gowun Dodum','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+    --font-mono:ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper-0:#1B1626; --paper-1:#241D33; --paper-2:#2D2540; --surface:#2A2338;
+      --ink-900:#F3EEE0; --ink-700:#D8D0E3; --ink-500:#A79CC0; --ink-300:#756A8C;
+      --line:#3A2F52; --line-strong:#4A3D68;
+      --violet:#A392E8; --teal:#6FC2A6; --coral:#E08A76; --gold:#E3B24E; --slate:#9A90B8;
+      --wire:#544A6E;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper-0:#1B1626; --paper-1:#241D33; --paper-2:#2D2540; --surface:#2A2338;
+    --ink-900:#F3EEE0; --ink-700:#D8D0E3; --ink-500:#A79CC0; --ink-300:#756A8C;
+    --line:#3A2F52; --line-strong:#4A3D68;
+    --violet:#A392E8; --teal:#6FC2A6; --coral:#E08A76; --gold:#E3B24E; --slate:#9A90B8;
+    --wire:#544A6E;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper-0);color:var(--ink-900);font-family:var(--font-body);font-size:13px}
+  h1,h2{font-family:var(--font-display);margin:0}
+
+  .page{padding:26px 22px 44px;max-width:1560px;margin:0 auto}
+  header.head{margin-bottom:6px}
+  .h-title{font-size:22px;font-weight:700;letter-spacing:-.3px}
+  .h-sub{font-size:12.5px;color:var(--ink-500);margin-top:5px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0 20px;padding:12px 14px;
+    border:1px solid var(--line);border-radius:12px;background:var(--paper-1)}
+  .lg{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-700)}
+  .lg i{width:22px;height:11px;border-radius:3px;flex:none}
+  .lg.dash i{background:transparent;border:1.5px dashed var(--ink-300)}
+
+  .canvas{position:relative;overflow-x:auto;padding-bottom:8px}
+  .grid{position:relative;display:grid;gap:26px 46px;min-width:1360px;
+    grid-template-columns:repeat(4, minmax(300px, 1fr));align-items:start}
+  svg.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible}
+  .col{display:flex;flex-direction:column;gap:22px;position:relative;z-index:1}
+  .col-head{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-300);
+    padding-bottom:7px;border-bottom:1px solid var(--line);margin-bottom:2px}
+
+  .box{border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);overflow:hidden;
+    box-shadow:0 1px 2px rgba(37,26,61,.05)}
+  .box.todo{border-style:dashed;opacity:.9}
+  .box .bh{padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .box .bh b{font-size:13px;color:#FFFFFF;font-weight:700}
+  .box .bh span{font-family:var(--font-mono);font-size:9.5px;color:rgba(255,255,255,.82)}
+  .b-violet .bh{background:var(--violet)} .b-teal .bh{background:var(--teal)}
+  .b-coral .bh{background:var(--coral)} .b-gold .bh{background:var(--gold)}
+  .b-slate .bh{background:var(--slate)}
+
+  .row{display:flex;gap:9px;padding:8px 11px;border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:none}
+  .row .n{flex:none;width:17px;height:17px;border-radius:4px;background:var(--paper-2);color:var(--ink-500);
+    font-family:var(--font-mono);font-size:10px;display:grid;place-items:center;margin-top:1px}
+  .row .t{flex:1;min-width:0}
+  .row .t b{font-size:12px;font-weight:700;color:var(--ink-900);display:block;line-height:1.45}
+  .row .t ul{margin:5px 0 0;padding-left:12px;list-style:none}
+  .row .t li{font-size:11px;color:var(--ink-500);line-height:1.65;position:relative}
+  .row .t li::before{content:"·";position:absolute;left:-9px;color:var(--ink-300)}
+  .row .t .flag{display:inline-block;font-family:var(--font-mono);font-size:9px;padding:1px 6px;border-radius:999px;
+    margin-left:5px;vertical-align:1px}
+  .flag.ai{background:rgba(46,124,104,.14);color:var(--teal)}
+  .flag.todo{background:rgba(185,80,63,.13);color:var(--coral)}
+  .flag.gate{background:rgba(181,124,22,.14);color:var(--gold)}
+
+  .note{margin-top:22px;border:1px dashed var(--line-strong);border-radius:12px;padding:14px 16px;
+    background:var(--paper-1);font-size:12px;line-height:1.85;color:var(--ink-700)}
+  .note b{color:var(--ink-900)}
+  @media (max-width:760px){ .page{padding:18px 14px 36px} .h-title{font-size:18px} }
+</style>
+
+<div class="page">
+  <header class="head">
+    <div class="h-title">자람마을 앱 상세 구조도</div>
+    <div class="h-sub">Information Architecture · 프로토타입 v6 기준 · 2026-09-08 · 괄호 안은 화면 ID (IA 문서와 동일)</div>
+  </header>
+
+  <div class="legend">
+    <span class="lg"><i style="background:var(--gold)"></i>진입 · 규제 대응</span>
+    <span class="lg"><i style="background:var(--violet)"></i>홈 · 사고력</span>
+    <span class="lg"><i style="background:var(--teal)"></i>교과 학습</span>
+    <span class="lg"><i style="background:var(--coral)"></i>인성 · 애니메이션</span>
+    <span class="lg"><i style="background:var(--slate)"></i>지원 메뉴</span>
+    <span class="lg dash"><i></i>점선 박스 = 미구현</span>
+    <span class="lg"><span class="flag ai">AI</span>실제 Claude 호출</span>
+    <span class="lg"><span class="flag gate">GATE</span>말해야 열리는 구간</span>
+  </div>
+
+  <div class="canvas">
+    <div class="grid" id="grid">
+      <svg class="wires" id="wires" aria-hidden="true"></svg>
+
+      <div class="col">
+        <div class="col-head">01 · 진입 / 온보딩</div>
+        <div class="box b-gold todo" id="b-splash">
+          <div class="bh"><b>스플래시</b><span>SP-01</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>로고 · 초기 로딩<span class="flag todo">미구현</span></b></div></div>
+        </div>
+        <div class="box b-gold" id="b-age">
+          <div class="bh"><b>연령 확인</b><span>ON-01</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>연령대 확인</b>
+            <ul><li>3구간 선택 · 생년월일 미저장</li><li>재입력 유도 없는 중립 화면</li></ul></div></div>
+        </div>
+        <div class="box b-gold" id="b-consent">
+          <div class="bh"><b>법정대리인 동의</b><span>ON-02</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>동의 확인<span class="flag gate">GATE</span></b>
+            <ul><li>동의 방법 5종 선택</li><li>수집/미수집 항목 표</li><li>제3자 제공 별도 동의(거부 가능)</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>동의 거부 처리</b>
+            <ul><li>저장 없이 체험만 가능</li><li>발화·채점 저장 차단</li></ul></div></div>
+        </div>
+        <div class="box b-gold" id="b-ai">
+          <div class="bh"><b>생성형 AI 사전 고지</b><span>ON-03</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>AI 기반 운용 고지</b>
+            <ul><li>무엇을 생성 · 어떻게 표시</li><li>틀릴 수 있음 · 전달처</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>생성물 표시 방식 안내</b></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>개인정보처리방침 (ON-04)</b>
+            <ul><li>보호자용 8개 항목</li><li>아동용 쉬운 말 토글</li></ul></div></div>
+        </div>
+        <div class="box b-violet" id="b-diag">
+          <div class="bh"><b>첫 만남 진단</b><span>DG-01~02</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>진단 문항 1~3</b>
+            <ul><li>음성 또는 타이핑 답변</li><li>건너뛰기 가능</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>진단 결과<span class="flag ai">AI</span></b>
+            <ul><li>루브릭 3축 점수</li><li>되물음 강도·어휘 자동 설정</li><li>설정 근거 문장</li></ul></div></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="col-head">02 · 홈</div>
+        <div class="box b-violet" id="b-home">
+          <div class="bh"><b>오늘의 모험 (홈)</b><span>HM-01~05</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>홈 대시보드</b>
+            <ul><li>아이 이름으로 인사</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>진단 유도 배너</b>
+            <ul><li>진단 미완료 시에만 노출</li></ul></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>장소 카드 3종</b>
+            <ul><li>생각숲 · 호기심 실험실 · 마음극장</li><li>오늘의 추천 배지</li></ul></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>최근에 함께한 이야기</b></div></div>
+          <div class="row"><span class="n">5</span><div class="t"><b>지금 맞춰진 난이도</b>
+            <ul><li>자기개선 루프 근거 노출</li></ul></div></div>
+          <div class="row"><span class="n">6</span><div class="t"><b>이어하기 배너</b>
+            <ul><li>중단된 세션이 있을 때만</li><li>멈춘 자리부터 복원</li></ul></div></div>
+        </div>
+        <div class="box b-slate" id="b-global">
+          <div class="bh"><b>전역 공통</b><span>GL-01~02</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>사이드 내비게이션</b>
+            <ul><li>5개 메뉴 · 아이 카드</li><li>AI 연결 상태</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>상단 바</b>
+            <ul><li>브레드크럼</li><li>실제 AI / 파라메트릭 렌더링 배지</li></ul></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>개인식별정보 마스킹 (GL-03)</b>
+            <ul><li>저장 직전 이름·학교·연락처 ●●●</li><li>가린 항목 종류만 기록</li></ul></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>보관기간 자동 파기 (GL-04)</b>
+            <ul><li>기본 90일 · 30/90/180 설정</li><li>열 때마다 만료분 삭제</li></ul></div></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="col-head">03 · 학습 장소</div>
+        <div class="box b-violet" id="b-forest">
+          <div class="bh"><b>생각숲 · 사고력</b><span>FR-01~07</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>장면 1 + 갈림길 선택</b>
+            <ul><li>선택이 다음 장면을 바꿈</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>단서 장면</b></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>되물음 게이트<span class="flag gate">GATE</span></b>
+            <ul><li>음성 입력 · 타이핑</li><li>최소 분량 · 우회 감지</li><li>Ghost Card 비교</li></ul></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>되물음 결과 + 루브릭<span class="flag ai">AI</span></b>
+            <ul><li>아이 말을 인용한 되물음</li><li>관찰 · 추론 · 표현 채점</li></ul></div></div>
+          <div class="row"><span class="n">5</span><div class="t"><b>결말 + 오늘의 배움</b>
+            <ul><li>읽어주기(TTS)</li></ul></div></div>
+          <div class="row"><span class="n">6</span><div class="t"><b>퀴즈 2문항</b></div></div>
+          <div class="row"><span class="n">7</span><div class="t"><b>세션 완료</b>
+            <ul><li>책장·리포트 저장</li></ul></div></div>
+        </div>
+
+        <div class="box b-teal" id="b-lab">
+          <div class="bh"><b>호기심 실험실 · 교과</b><span>LB-01~09</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>주제 선택</b>
+            <ul><li>프리셋 4종 (전용 화면)</li><li>키워드 직접 입력</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>차단 화면</b>
+            <ul><li>부적절 주제 생성 거부</li></ul></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>프리셋 실험 (파라메트릭)</b>
+            <ul><li>과학 · 그림자와 빛</li><li>수학 · 닮음과 합동</li><li>역사 · 세종대왕과 훈민정음</li><li>역사 · 임진왜란 연표</li></ul></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>생성 활동<span class="flag ai">AI</span></b>
+            <ul><li>주제 문자열 → 관찰 활동 생성</li><li>학년·관심사·어휘 수준 반영</li></ul></div></div>
+          <div class="row"><span class="n">5</span><div class="t"><b>관찰 게이트<span class="flag gate">GATE</span></b>
+            <ul><li>양쪽 끝 관찰해야 입력 열림</li></ul></div></div>
+          <div class="row"><span class="n">6</span><div class="t"><b>되물음 결과 + 루브릭<span class="flag ai">AI</span></b></div></div>
+          <div class="row"><span class="n">7</span><div class="t"><b>개념 정리 + 근거 패널</b>
+            <ul><li>검수 여부 배지</li><li>참고 자료 · 교육과정 매핑 상태</li></ul></div></div>
+          <div class="row"><span class="n">8</span><div class="t"><b>확인 문제</b></div></div>
+          <div class="row"><span class="n">9</span><div class="t"><b>세션 완료</b></div></div>
+        </div>
+
+        <div class="box b-coral" id="b-theater">
+          <div class="bh"><b>마음극장 · 인성</b><span>TH-01~08</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>키워드 입력 (부모)</b>
+            <ul><li>검수 대본 6종 칩 (즉시 재생)</li><li>자유 키워드 · 차단 시연 칩</li></ul></div></div>
+          <div class="row"><span class="n">0</span><div class="t"><b>검수 대본 라이브러리 (TH-09)</b>
+            <ul><li>노인공경·공손함·정직·배려·용기·약속</li><li>장면별 대사와 감정 · 부모용 해설</li><li>생성 품질의 기준선</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>차단 화면</b>
+            <ul><li>1차 금칙어 (AI 호출 전)</li><li>2차 AI 안전 심사</li></ul></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>생성 로딩<span class="flag ai">AI</span></b>
+            <ul><li>품질 기준 8개 + 완성 예시 1편 동봉</li><li>대본 5장면 + 안전 판정</li><li>AI 없으면 생성한 척하지 않고 안내</li></ul></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>부모 먼저보기</b>
+            <ul><li>대본 전체 · 대사 · 감정</li><li>품질 자체점검 5항목</li><li>부모용 해설</li></ul></div></div>
+          <div class="row"><span class="n">5</span><div class="t"><b>애니메이션 재생</b>
+            <ul><li>말풍선 대사 · 감정 칩</li><li>자막 · 읽어주기 · 재생 제어</li></ul></div></div>
+          <div class="row"><span class="n">6</span><div class="t"><b>선택 분기</b>
+            <ul><li>아이 선택이 결말을 바꿈</li></ul></div></div>
+          <div class="row"><span class="n">7</span><div class="t"><b>결말 + 열린 질문</b>
+            <ul><li>훈계 없이 질문으로 마무리</li></ul></div></div>
+          <div class="row"><span class="n">8</span><div class="t"><b>세션 완료</b></div></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="col-head">04 · 기록 · 설정 · 결제</div>
+        <div class="box b-slate" id="b-shelf">
+          <div class="bh"><b>나의 책장</b><span>SH-01</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>완성 기록 목록</b>
+            <ul><li>트랙별 구분 · 사고력 평균</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>기록 다시 보기 (SH-02)</b>
+            <ul><li>동화 장면 재생 · 읽어주기</li><li>그때 한 말 · 되물음 · 루브릭</li></ul></div></div>
+        </div>
+        <div class="box b-violet" id="b-report">
+          <div class="bh"><b>성장 리포트 (학부모)</b><span>RP-01~08</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>지표 타일</b>
+            <ul><li>완성 수 · 말한 글자 수 · 평균 · 증감</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>이번 주 부모님께 (RP-09)<span class="flag ai">AI</span></b>
+            <ul><li>아이 문장·추이를 읽고 요약</li><li>다음 주에 해볼 것 제안</li><li>자람 플러스 가치</li></ul></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>주간 사고력 곡선</b>
+            <ul><li>3축 4주 추이 · 표로 보기</li></ul></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>아이가 말한 문장</b>
+            <ul><li>발화 원문 보관</li></ul></div></div>
+          <div class="row"><span class="n">5</span><div class="t"><b>공유 카드</b></div></div>
+          <div class="row"><span class="n">6</span><div class="t"><b>부모 확인 · 안전</b>
+            <ul><li>안전 6원칙 · 차단 로그</li></ul></div></div>
+          <div class="row"><span class="n">7</span><div class="t"><b>자기개선 루프 근거</b></div></div>
+          <div class="row"><span class="n">8</span><div class="t"><b>플랜 (무료 / 자람 플러스)</b></div></div>
+          <div class="row"><span class="n">9</span><div class="t"><b>데이터 열람 · 삭제 (RP-08)</b>
+            <ul><li>기록별·항목별·전체 삭제</li><li>내려받기 · 보관기간 설정</li></ul></div></div>
+        </div>
+        <div class="box b-slate" id="b-profile">
+          <div class="bh"><b>아이 프로필</b><span>PF-01~03</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>아이 정보</b>
+            <ul><li>이름 · 학년 · 관심사 · 진단 결과</li><li>모든 생성·채점 프롬프트에 전달됨</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>부모 설정</b>
+            <ul><li>되물음 강도 · 자동 조정</li><li>읽어주기 · 부모 먼저보기</li></ul></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>기록 초기화</b></div></div>
+        </div>
+        <div class="box b-slate" id="b-tech">
+          <div class="bh"><b>기술 · 안전 패널 (심사용)</b><span>TC-01~05</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>상태 타일</b>
+            <ul><li>연결 상태 · 호출 수 · 평균 지연</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>실제 / 목업 구분표</b></div></div>
+          <div class="row"><span class="n">3</span><div class="t"><b>AI 호출 로그</b></div></div>
+          <div class="row"><span class="n">4</span><div class="t"><b>안전 파이프라인 4단계</b></div></div>
+          <div class="row"><span class="n">5</span><div class="t"><b>비용 · 확장 메모</b></div></div>
+        </div>
+        <div class="box b-gold" id="b-pay">
+          <div class="bh"><b>결제</b><span>PY-01~02</span></div>
+          <div class="row"><span class="n">1</span><div class="t"><b>부모 게이트 (PY-01)<span class="flag gate">GATE</span></b>
+            <ul><li>두 자리 곱셈 확인</li><li>리포트·프로필·기술·데이터 진입 시</li></ul></div></div>
+          <div class="row"><span class="n">2</span><div class="t"><b>플랜 결제<span class="flag todo">미구현</span></b>
+            <ul><li>결제 후 부모에게 고지 발송</li><li>취소 가능 안내</li></ul></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>읽는 법</b> — 왼쪽에서 오른쪽으로 흐른다. 1열은 서비스에 들어오기까지 반드시 지나야 하는 관문이고, 2열의 홈이 허브, 3열이 실제 학습이 일어나는 세 장소, 4열이 기록과 설정이다.<br>
+    <b>규제에서 도출된 화면 7개 중 5개가 구현됐다.</b> 연령 확인·법정대리인 동의·AI 사전 고지·개인정보처리방침·데이터 열람 삭제·부모 게이트가 실제로 동작하고, 남은 점선은 스플래시와 결제뿐이다. 동의를 거부하면 저장 없이 체험만 되도록 코드로 막아 두었다.<br>
+    <b>GATE 표시가 붙은 두 곳</b>이 이 서비스의 심장이다. 아이가 스스로 말하거나 적기 전에는 다음 화면이 열리지 않는다.<br>
+    <b>아이 프로필은 장식이 아니다</b> — 학년·관심사·진단 수준이 마음극장 대본과 실험 활동, 되물음 채점 프롬프트에 그대로 실려 나간다. 화면에는 무엇을 보냈는지 배지로 표시된다.
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  /* 박스 사이 연결선을 레이아웃 측정 후에 그린다 — 화면 폭이 바뀌어도 다시 맞춘다 */
+  var LINKS = [
+    ["b-splash","b-age"], ["b-age","b-consent"], ["b-consent","b-ai"], ["b-ai","b-diag"],
+    ["b-diag","b-home"],
+    ["b-home","b-forest"], ["b-home","b-lab"], ["b-home","b-theater"],
+    ["b-home","b-shelf"], ["b-home","b-report"], ["b-home","b-profile"], ["b-home","b-tech"],
+    ["b-report","b-pay"], ["b-shelf","b-report"]
+  ];
+  var grid = document.getElementById("grid"), svg = document.getElementById("wires");
+
+  function draw(){
+    var gb = grid.getBoundingClientRect();
+    svg.setAttribute("viewBox", "0 0 " + gb.width + " " + gb.height);
+    var parts = ['<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">'+
+                 '<path d="M0,0 L8,4 L0,8 z" fill="var(--wire)"/></marker></defs>'];
+    LINKS.forEach(function(pair){
+      var a = document.getElementById(pair[0]), b = document.getElementById(pair[1]);
+      if(!a || !b) return;
+      var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      var ax, ay, bx, by, d;
+      var sameCol = Math.abs(ra.left - rb.left) < 4;
+      if(sameCol){
+        /* 같은 열 — 아래로 잇는다 */
+        ax = ra.left - gb.left + ra.width/2; ay = ra.bottom - gb.top;
+        bx = rb.left - gb.left + rb.width/2; by = rb.top - gb.top;
+        d = "M"+ax+","+ay+" L"+bx+","+(by-6);
+      } else {
+        /* 다른 열 — 오른쪽 모서리에서 나가 왼쪽 모서리로 들어간다 */
+        ax = ra.right - gb.left; ay = ra.top - gb.top + Math.min(34, ra.height/2);
+        bx = rb.left - gb.left; by = rb.top - gb.top + Math.min(34, rb.height/2);
+        var mid = ax + (bx - ax)/2;
+        d = "M"+ax+","+ay+" H"+mid+" V"+by+" H"+(bx-6);
+      }
+      parts.push('<path d="'+d+'" fill="none" stroke="var(--wire)" stroke-width="1.4" marker-end="url(#ah)"/>');
+    });
+    svg.innerHTML = parts.join("");
+  }
+  draw();
+  window.addEventListener("resize", function(){ clearTimeout(window.__t); window.__t = setTimeout(draw, 120); });
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+})();
+</script>
+
+</body>
+</html>
