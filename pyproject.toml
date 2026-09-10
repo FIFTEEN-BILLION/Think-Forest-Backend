@@ -1,0 +1,26 @@
+[project]
+name = "jaram-village-api"
+version = "0.1.0"
+description = "자람마을 백엔드 — 프론트엔드의 Claude 호출을 서버에서 대신한다"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning:starlette.*",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]  # FastAPI 의 Depends(...) 기본값 패턴
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+"app/prompts/*" = ["E501"]  # 프롬프트는 산문. 줄바꿈이 의미를 해친다
+"app/data/*" = ["E501"]     # 검수 대본 콘텐츠

@@ -1,0 +1,5 @@
+# 개발·테스트 전용 의존성. 운영 배포에는 포함하지 않는다.
+-r requirements.txt
+pytest==9.1.1
+httpx==0.28.1
+ruff==0.14.5

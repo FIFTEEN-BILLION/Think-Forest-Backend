@@ -1,0 +1,17 @@
+# 환경변수 — 절대 커밋 금지
+.env
+.env.*
+!.env.example
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# OS / 에디터
+.DS_Store
+Thumbs.db

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m *)",
+      "Bash(python3 -m *)",
+      "Bash(pip install *)",
+      "Bash(pip freeze *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(fastapi dev *)",
+      "Bash(uvicorn *)",
+      "Bash(curl http://127.0.0.1:8000/*)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git branch *)",
+      "Bash(git pull)",
+      "Read(./app/**)",
+      "Read(./tests/**)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./.venv/**)",
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)"
+    ],
+    "ask": [
+      "Bash(git push *)"
+    ]
+  }
+}
