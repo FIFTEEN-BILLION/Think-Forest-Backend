@@ -12,6 +12,9 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+# 로컬 SQLite DB
+/data/
+
 # OS / 에디터
 .DS_Store
 Thumbs.db

@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "tests"]  # tests/conftest.py 의 공용 도우미를 테스트에서 import 한다
 addopts = "-q"
 filterwarnings = [
     "ignore::DeprecationWarning:starlette.*",
