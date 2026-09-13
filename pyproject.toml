@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", "tests"]  # tests/conftest.py 의 공용 도우미를 테스트에서 import 한다
 addopts = "-q"
 filterwarnings = [
     "ignore::DeprecationWarning:starlette.*",
@@ -23,4 +24,5 @@ ignore = ["B008"]  # FastAPI 의 Depends(...) 기본값 패턴
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501"]
 "app/prompts/*" = ["E501"]  # 프롬프트는 산문. 줄바꿈이 의미를 해친다
+"app/api_docs.py" = ["E501"]  # API 문서 설명도 산문
 "app/data/*" = ["E501"]     # 검수 대본 콘텐츠
