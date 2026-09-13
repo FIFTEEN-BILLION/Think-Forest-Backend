@@ -83,6 +83,14 @@ app/
 - 예외를 삼키지 않는다. 실패는 코드와 함께 응답에 담아 프론트가 표시할 수 있게 한다.
 - 프롬프트 문자열은 라우터가 아니라 별도 모듈에 모은다.
 
+## 생각 친구 대화 엔진 (OpenAI) 규칙
+
+- OpenAI 호출은 `services/llm.py`(`call_structured`), 음성은 `services/speech.py`, 검사는 `services/moderation.py` 만 지난다.
+- 아이 문장·음성을 OpenAI 로 보내기 전에 `auth.ai_block_reason(child)` 를 확인한다. ZDR 전(`CHILD_DATA_MODE=demo`)에는 성인 테스터 계정만 허용.
+- 질문 종류·정리 시점·마치기 조건·성취 기준은 `app/talks/` 결정론 코드가 정한다. AI 출력으로 흐름을 바꾸지 않는다.
+- 민감 주제(`safety/topics.py`)는 LLM 호출 전후 모두 검사한다. 아이 외모·몸·개인정보를 묻는 출력은 버린다.
+- 점수를 만들지 않는다. 빈도와 성취 기준만 센다.
+
 ## 절대 하지 말 것
 
 - ❌ **`.env`를 커밋하기.** push 전 `git status --short`로 확인.

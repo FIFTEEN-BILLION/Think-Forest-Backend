@@ -50,6 +50,44 @@ pytest                                   # 24개 통과
 
 계약을 바꾸면 프론트엔드의 API 레이어(`../frontend/packages/app/src/api/`)도 같이 고친다.
 
+## 생각 친구 대화 엔진 (v0.2, OpenAI)
+
+8~10살 아이가 AI '생각 친구'와 **사람과 이야기하듯** 대화하며 생각을 문장으로 말하고 넓히는 흐름이다.
+AI 는 문장만 만들고, 어떤 질문을 던질지·언제 정리하고 끝낼지·성취 기준은 규칙(`app/talks/`)이 정한다.
+
+- **주제를 먼저 던진다** — 요일 테마(월 과학 · 화 수학 · 수 역사 · 목 생각놀이 · 금 상상 실험 · 토 오늘 일기 · 일 내가 고른 주제)
+- **흐름** — 주제 → 꼬리질문 → 생활 연결 → '진짜일까?' → 상상 장면 → 꼬리질문 → 생각 지키기/바꾸기(이유 다시 말하기) → 긴 문장으로 정리 → 이야기 플롯 완성본
+- **답은 문장으로** — 단답이면 앞으로 나아가지 않고 문장 틀을 주며 다시 말하게 한다. 글자 수 난이도는 없다
+- **한 이야기 15분 필수** — 실제 대화 시간 기준(자리를 비운 시간 제외). 원하면 계속 이어 간다
+- **점수 없음** — 빈도(이야기 수·대화 시간·활동한 날)와 성취 기준(이유 말하기·새 생각 보태기·상상·생각 다시 보기·정리·끝까지·새 단어 쓰기)만 센다
+- **아이 혼자, 보호자는 권한으로** — 보호자가 기기 토큰과 권한(음성·공유 둘러보기·공유 요청)을 준다
+
+| 엔드포인트 | 누가 | 하는 일 |
+|---|---|---|
+| `POST /families` | — | 가족 생성, 보호자 토큰(개발용) |
+| `POST /guardian/children` · `PUT …/{id}/permissions` · `POST/DELETE …/{id}/devices` | 보호자 | 아이 생성, 권한, 태블릿 토큰 발급·회수 |
+| `GET /guardian/children/{id}/talks[/{talkId}]` · `…/safety-events` · `…/progress` · `…/words` | 보호자 | 대화 확인, 안전 사건, 성장 기록, 단어 |
+| `GET /onboarding` · `POST /onboarding/messages` · `POST /onboarding/confirm` | 아이 | 첫 만남 채팅으로 별명·소속+학년·좋아하는 것·키우고 싶은 것 추출 |
+| `GET /talks/today` · `POST /talks` · `POST /talks/{id}/turns` · `POST /talks/{id}/finish` | 아이 | 오늘 테마·주제 제안, 대화 시작(주제/일기/내 카테고리/공유 모험), 대화 한 번, 마치기 |
+| `GET/POST/DELETE /children/me/categories` · `POST …/{id}/topics` | 아이 | '!' 버튼 카테고리, 주제 제안 |
+| `POST /words/explain` · `/children/me/words` · `/children/me/word-quizzes` | 아이 | 어려운 낱말 풀이(호버), 단어 보관함, 퀴즈 |
+| `POST/GET /guardian/children/{id}/word-tests` | 보호자 | 단어 검사 내기·결과 |
+| `/children/me/stories` · `/children/me/books` | 아이 | 이야기, 이야기책 묶기 |
+| `POST /children/me/shares` · `POST /guardian/shares/{id}/decision` · `POST /guardian/adventures` · `GET /shares` · `POST /shares/{id}/reports` · `/guardian/circles` | 아이·보호자 | 공유 요청 → 보호자 승인 → 가족/모임/전체 공개, 보호자 모험 만들기, 신고 |
+| `POST /speech/realtime-sessions` · `POST /speech/transcriptions` | 아이 | 말하는 동안 바로 보이는 실시간 인식 임시 키, 녹음 파일 인식 |
+| `POST/GET /guardian/children/{id}/consultations` | 보호자 | 1달 이용 뒤 AI 상담 요약(집계만 사용) |
+
+안전 순서(대화 한 번): 민감 주제(선정·정치·폭력·외모·개인정보 요청·자해 신호) → 문장 확인 → 개인정보 가림 →
+Moderation(허용 시) → 흐름 결정 → AI 문장 생성 → 출력 검사(민감 주제·낱말 존재·그림 키) → 실패 시 규칙 대사.
+자해 신호는 원문 없이 `safety_events` 로 남겨 보호자가 확인한다.
+
+**아동 데이터 원칙** — OpenAI 18세 미만 지침상 13세 미만 개인정보는 ZDR 승인 뒤에만 처리한다.
+`CHILD_DATA_MODE=demo`(기본)에서는 실제 아이의 문장·음성을 OpenAI(대화·음성·Moderation 모두)로 보내지 않고
+규칙 기반으로 동작한다. 성인 테스터 계정(`tester: true`)만 실제 AI 를 쓴다.
+학교 이름·주소·실명은 저장하지 않는다(소속 종류와 학년만). 공유는 개인정보를 가린 스냅숏만 게시한다.
+
+**미검증** — 실제 OpenAI 호출(키 없음), Realtime 전사 세션 안의 한국어 지정 필드 이름, 운영 DB(PostgreSQL) 이전.
+
 ## 안전 파이프라인 (순서 고정)
 
 1. **1차 금칙어 필터** — `safety/blocklist.py`. 정규화(공백·구두점·반복문자 제거) 후
