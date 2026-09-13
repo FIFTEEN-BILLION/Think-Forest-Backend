@@ -22,6 +22,7 @@ from .routers import (
     report,
     rubric,
     shares,
+    speech,
     talks,
     tech,
     theater,
@@ -66,6 +67,7 @@ app.include_router(categories.router)
 app.include_router(library.router)
 app.include_router(shares.router)
 app.include_router(progress.router)
+app.include_router(speech.router)
 
 
 @app.get("/health", tags=["health"])
