@@ -16,7 +16,9 @@ from .routers import (
     families,
     inquiry,
     lab,
+    library,
     onboarding,
+    progress,
     report,
     rubric,
     talks,
@@ -60,6 +62,8 @@ app.include_router(families.router)
 app.include_router(onboarding.router)
 app.include_router(talks.router)
 app.include_router(categories.router)
+app.include_router(library.router)
+app.include_router(progress.router)
 
 
 @app.get("/health", tags=["health"])
