@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import diagnostic, lab, report, rubric, tech, theater
+from .routers import diagnostic, inquiry, lab, report, rubric, tech, theater
 
 settings = get_settings()
 
@@ -30,6 +30,7 @@ app.include_router(theater.router)
 app.include_router(lab.router)
 app.include_router(report.router)
 app.include_router(tech.router)
+app.include_router(inquiry.router)
 
 
 @app.get("/health", tags=["health"])
