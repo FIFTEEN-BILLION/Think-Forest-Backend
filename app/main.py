@@ -21,6 +21,7 @@ from .routers import (
     progress,
     report,
     rubric,
+    shares,
     talks,
     tech,
     theater,
@@ -63,6 +64,7 @@ app.include_router(onboarding.router)
 app.include_router(talks.router)
 app.include_router(categories.router)
 app.include_router(library.router)
+app.include_router(shares.router)
 app.include_router(progress.router)
 
 
