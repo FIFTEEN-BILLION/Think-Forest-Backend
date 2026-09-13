@@ -11,12 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .db import init_db
 from .routers import (
+    categories,
     diagnostic,
     families,
     inquiry,
     lab,
+    onboarding,
     report,
     rubric,
+    talks,
     tech,
     theater,
 )
@@ -54,6 +57,9 @@ app.include_router(tech.router)
 app.include_router(inquiry.router)
 # 생각 친구 대화 엔진
 app.include_router(families.router)
+app.include_router(onboarding.router)
+app.include_router(talks.router)
+app.include_router(categories.router)
 
 
 @app.get("/health", tags=["health"])
