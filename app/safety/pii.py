@@ -42,7 +42,8 @@ class MaskResult:
     categories: list[str]  # 가려진 항목의 '종류'만
 
 
-def mask(text: str) -> MaskResult:
+def mask(text: str, *, names: bool = True) -> MaskResult:
+    """names=False 는 별명을 일부러 받는 온보딩 대화에서만 쓴다."""
     if not text:
         return MaskResult(text=text, categories=[])
 
@@ -62,7 +63,7 @@ def mask(text: str) -> MaskResult:
     _sub(_PHONE, "전화번호", out)
 
     # 이름은 캡처그룹만 치환
-    if _NAME.search(out):
+    if names and _NAME.search(out):
         out = _NAME.sub(lambda m: m.group(0).replace(m.group(1) or m.group(2), _MASK), out)
         categories.append("이름")
 
