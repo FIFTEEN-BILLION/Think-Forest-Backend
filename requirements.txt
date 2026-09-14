@@ -1,5 +1,7 @@
 # 런타임 의존성 (직접 의존). 패키지 추가 후 버전을 갱신한다.
 anthropic==1.4.0
 fastapi[standard]==0.141.1
+openai==3.13.0
 pydantic==2.13.5
 python-dotenv==1.2.3
+sqlalchemy==2.0.52
