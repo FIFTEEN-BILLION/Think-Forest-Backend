@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import api_docs
 from .config import get_settings
 from .db import init_db
 from .routers import (
@@ -68,6 +69,9 @@ app.include_router(library.router)
 app.include_router(shares.router)
 app.include_router(progress.router)
 app.include_router(speech.router)
+
+# /docs 에 한국어 설명·순서·예시를 붙인다.
+api_docs.install(app)
 
 
 @app.get("/health", tags=["health"])
