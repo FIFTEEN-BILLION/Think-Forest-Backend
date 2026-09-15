@@ -38,6 +38,10 @@ class Settings(BaseModel):
     speech_enabled: bool = True
     daily_ai_call_limit: int = 300
     talk_min_seconds: int = 900  # 한 이야기 필수 15분(실제 대화한 시간 기준)
+    # 텍스트 → 음성(Typecast). voice_id 는 콘솔/GET https://api.typecast.ai/v2/voices 에서 확인.
+    typecast_api_key: str | None = None
+    typecast_voice_id: str | None = None
+    typecast_model: str = "ssfm-v30"
 
     @property
     def ai_enabled(self) -> bool:
@@ -48,6 +52,11 @@ class Settings(BaseModel):
     def openai_enabled(self) -> bool:
         """사고력 엔진의 실제 OpenAI 호출이 가능한 상태인지."""
         return bool(self.openai_api_key) and self.ai_switch
+
+    @property
+    def typecast_enabled(self) -> bool:
+        """실제 Typecast 합성이 가능한 상태인지(키 + voice_id 모두 필요)."""
+        return bool(self.typecast_api_key) and bool(self.typecast_voice_id)
 
 
 def _split_origins(raw: str | None) -> list[str]:
@@ -77,6 +86,9 @@ def get_settings() -> Settings:
         speech_enabled=_flag(os.getenv("SPEECH_ENABLED")),
         daily_ai_call_limit=int(os.getenv("DAILY_AI_CALL_LIMIT") or 300),
         talk_min_seconds=int(os.getenv("TALK_MIN_SECONDS") or 900),
+        typecast_api_key=os.getenv("TYPECAST_API_KEY") or None,
+        typecast_voice_id=os.getenv("TYPECAST_VOICE_ID") or None,
+        typecast_model=os.getenv("TYPECAST_MODEL") or "ssfm-v30",
     )
 
 
