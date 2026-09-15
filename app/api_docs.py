@@ -66,6 +66,10 @@ TAGS: dict[str, tuple[str, str]] = {
         "5. 음성 입력 (아이)",
         "말하는 동안 글자를 바로 보여 주는 실시간 인식 키, 녹음 파일 인식. 보호자의 음성 권한이 필요합니다.",
     ),
+    "voice": (
+        "5. 음성 출력 (아이)",
+        "문장을 Typecast 음성으로 읽어 줍니다. 보호자의 음성 권한이 필요합니다.",
+    ),
     "library": (
         "6. 단어·이야기책 (아이·보호자)",
         "어려운 낱말 풀이, 단어 보관함, 단어 퀴즈와 보호자 단어 검사, 완성한 이야기와 이야기책.",
@@ -227,6 +231,13 @@ OPERATIONS: dict[tuple[str, str], tuple[str, str, str]] = {
         "브라우저가 이 키로 OpenAI Realtime 에 직접 연결합니다. 필요 조건은 녹음 파일 인식과 같습니다.",
         C,
     ),
+    ("POST", "/voice/synthesize"): (
+        "문장을 음성으로 읽어주기",
+        "`text`(최대 2000자)를 Typecast 로 합성해 오디오(mp3)를 그대로 돌려줍니다(JSON 아님). "
+        "voice_id 는 서버 설정에 고정되어 있습니다. 필요: 보호자 `voice` 권한. "
+        "금칙어가 섞이면 `403 blocked_content`, 하루 호출 한도를 넘으면 `429 daily_limit`.",
+        C,
+    ),
     # 6. 단어·이야기책
     ("POST", "/words/explain"): (
         "어려운 낱말 풀이",
@@ -359,6 +370,7 @@ EXAMPLES: dict[tuple[str, str], dict] = {
     ("POST", "/talks/{talk_id}/turns"): {"text": "눈으로 눈사람을 만들고 눈싸움도 할 수 있어", "inputMode": "text"},
     ("POST", "/children/me/categories"): {"name": "공룡"},
     ("POST", "/words/explain"): {"text": "수증기가 차가운 컵 겉면에 붙어서 물방울이 돼요"},
+    ("POST", "/voice/synthesize"): {"text": "안녕! 오늘은 어떤 이야기를 해 볼까?"},
     ("POST", "/children/me/words"): {"word": "수증기", "meaning": "물이 눈에 안 보이는 기체가 된 것", "example": ""},
     ("POST", "/children/me/word-quizzes"): {"count": 3},
     ("POST", "/children/me/word-quizzes/{quiz_id}/answers"): {"index": 0, "chosen": 1},
