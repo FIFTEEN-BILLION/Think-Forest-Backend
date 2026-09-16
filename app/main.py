@@ -27,6 +27,7 @@ from .routers import (
     talks,
     tech,
     theater,
+    voice,
 )
 
 settings = get_settings()
@@ -69,6 +70,7 @@ app.include_router(library.router)
 app.include_router(shares.router)
 app.include_router(progress.router)
 app.include_router(speech.router)
+app.include_router(voice.router)
 
 # /docs 에 한국어 설명·순서·예시를 붙인다.
 api_docs.install(app)

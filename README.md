@@ -10,7 +10,7 @@
 
 ---
 
-## 지금까지 진행한 내용 (2026-09-13 기준)
+## 지금까지 진행한 내용 (2026-09-15 기준)
 
 | 영역 | 내용 | 상태 |
 |---|---|---|
@@ -26,10 +26,15 @@
 | 공유 | 공유 요청 → 보호자 승인 → 가족/친구 모임/전체 공개, 보호자 모험, 신고 자동 숨김 | ✅ |
 | 성장 기록 | 점수 없이 빈도·성취 기준 7가지, 1달 뒤 보호자 AI 상담 | ✅ |
 | 음성 입력 | 녹음 파일 인식, 실시간 인식 임시 키 | ✅ (실제 호출 미검증) |
+| 음성 출력(TTS) | `POST /voice/synthesize` — 문장을 Typecast 로 읽어 줌(voice_id 고정) | ✅ (실제 호출 로컬 검증 완료, 프론트 미연동) |
 | 그림자 첫 탐구 | 헷갈리는 생각 친구를 공정한 실험 증거로 설득(프론트 화면 연결) | ✅ |
 | API 문서 | `/docs` 한국어 설명·순서·예시 본문 | ✅ |
 
-**아직 검증하지 못한 것** — 실제 OpenAI 호출(키 없음), 실시간 음성 인식 세션의 한국어 지정 필드, 태블릿 실기기, 운영 DB(PostgreSQL).
+**실제 OpenAI 호출 검증 완료(2026-09-15)** — 성인 테스터 계정으로 `POST /talks` → `POST /talks/{id}/turns` 를 반복해 `compose` → 이야기 완성까지 전 과정을 실제 `gpt-5.6-luna` + `omni-moderation-latest` 호출로 확인. `/tech/panel` 기준 25건 전부 성공.
+
+**아직 검증하지 못한 것** — 음성 입력(STT) 실제 호출(`POST /speech/transcriptions`·`/speech/realtime-sessions`), 실시간 음성 인식 세션의 한국어 지정 필드, 태블릿 실기기, 운영 DB(PostgreSQL).
+
+**이번 검증 중 발견한 이슈** — [#10 외모 필터가 "잘 생기다/못 생기다"(동사 "생기다" 일반 활용)를 오탐](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/10), [#11 실제 `.env` 키가 있으면 `no_api_key` 부정 경로 테스트가 깨짐](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/11).
 
 ---
 
@@ -126,6 +131,9 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 | `DATABASE_URL` | `sqlite:///./data/thinkforest.db` | 운영은 PostgreSQL 주소 |
 | `CORS_ORIGINS` | `http://localhost:5173` | 쉼표 구분, `*` 금지 |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | (없음) / `claude-sonnet-5` | 초기 체험 기능 |
+| `TYPECAST_API_KEY` | (없음) | 없으면 음성 합성 `no_api_key` 실패 |
+| `TYPECAST_VOICE_ID` | (없음) | 고정 보이스(예: 이현). [Typecast 콘솔](https://typecast.ai) 또는 `GET /v2/voices` 로 확인 |
+| `TYPECAST_MODEL` | `ssfm-v30` | TTS 모델 |
 
 ---
 
@@ -196,6 +204,7 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 | `/children/me/stories` · `/children/me/books` | 아이 | 이야기, 이야기책 |
 | `POST /children/me/shares` · `POST /guardian/shares/{id}/decision` · `POST /guardian/adventures` · `GET /shares` · `POST /shares/{id}/reports` · `/guardian/circles` | 아이·보호자 | 공유 요청·승인, 보호자 모험, 둘러보기, 신고, 친구 모임 |
 | `POST /speech/realtime-sessions` · `POST /speech/transcriptions` | 아이 | 실시간 인식 키, 녹음 파일 인식 |
+| `POST /voice/synthesize` | 아이 | 문장을 음성(mp3/wav)으로 읽어 줌(Typecast, voice_id 고정) — JSON 아닌 오디오 바이너리 응답 |
 | `POST/GET /guardian/children/{id}/consultations` | 보호자 | 1달 뒤 AI 상담 |
 
 ### 그림자 첫 탐구 (토큰 없음)
@@ -235,23 +244,38 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 ```
 app/
 ├── main.py · config.py · db.py · clock.py · auth.py · models.py · api_docs.py
-├── routers/     families · onboarding · talks · categories · library · shares · progress · speech
+├── routers/     families · onboarding · talks · categories · library · shares · progress · speech · voice(TTS)
 │                inquiry(그림자 첫 탐구) · diagnostic · rubric · theater · lab · report · tech
 ├── talks/       planner(대화 흐름) · sentences(문장 확인) · topics(주제·요일 테마) · plot(이야기) · onboarding · progress
 ├── missions/    shadow.py (그림자 모형·설득 판정)
 ├── prompts/     talk.py · inquiry.py · shared.py · 초기 기능 프롬프트
 ├── schemas/     family · talk · library · inquiry · common · 초기 기능 스키마
-├── services/    llm(OpenAI) · speech · moderation · sharing · usage · claude · diagnostics · storage
+├── services/    llm(OpenAI) · speech · tts(Typecast) · moderation · sharing · usage · claude · diagnostics · storage
 └── safety/      topics(민감 주제) · blocklist · pii
 tests/           conftest(메모리 DB·고정 시계) + 기능별 테스트
 ```
 
 ## 남은 작업
 
-- [ ] 실제 OpenAI 호출 검증(성인 테스터 계정): 대화 품질·지연·비용, 실시간 음성 인식 세션 설정 확인
-- [ ] 보호자 실제 인증(Supabase Auth 등)과 법정대리인 동의 확인
+**보안·인프라**
+- [ ] 보호자 실제 인증(Supabase Auth 등)과 법정대리인 동의 확인 — 지금은 개발용 토큰(`gt_`/`ct_`)뿐, 실제 신원 확인 없음
+- [ ] `CHILD_DATA_MODE=child` 전환을 위한 OpenAI ZDR(Zero Data Retention) 승인
+- [ ] 배포(HTTPS)와 `CORS_ORIGINS` 배포 도메인 — 아직 어디에도 배포 안 됨
+- [ ] 저장소 기본 브랜치를 `develop` 으로 바꾸기(저장소 관리자 설정) — 확인 결과 현재 기본 브랜치가 `feat/jinyoung-backend-init` 로 되어 있음
+
+**데이터 영속화**
 - [ ] PostgreSQL 운영 DB, Alembic 마이그레이션, 보관기간 만료 삭제 배치
-- [ ] 호출 한도·사용량 영속화, 운영 모니터링
+- [ ] 호출 한도·사용량(`services/usage.py`, `services/diagnostics.py`)이 전부 인메모리 — 재시작하면 초기화됨, DB/Redis 로 이전 필요
+
+**안전 필터**
+- [ ] [#10](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/10) 외모 필터 오탐("잘 생기다/못 생기다") 수정
 - [ ] 주제 은행 사실 문장 교육 검수, 민감 주제 패턴 보강(자모 분리 우회 등)
-- [ ] 배포(HTTPS)와 `CORS_ORIGINS` 배포 도메인
-- [ ] 저장소 기본 브랜치를 `develop` 으로 바꾸기(저장소 관리자 설정)
+
+**검증**
+- [ ] 음성 입력(STT) 실제 호출 검증(`/speech/transcriptions`·`/speech/realtime-sessions`), 실시간 인식 세션의 한국어 지정 필드명 재확인
+- [ ] 태블릿 실기기 테스트
+- [ ] [#11](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/11) `.env`에 실제 키가 있으면 깨지는 `no_api_key` 테스트 2건 수정(환경 격리)
+
+**프론트엔드 연동**
+- [ ] 프론트 `feat/backend-api-layer`(API 클라이언트·타입·훅) 브랜치가 아직 `develop`/`main`에 머지되지 않음 — 배포된 사이트가 백엔드를 실제로 호출하려면 먼저 필요
+- [ ] `POST /voice/synthesize`(Typecast TTS)를 화면 어디에 연결할지 결정 — 지금은 범용 엔드포인트만 있고 프론트 연동은 안 됨

@@ -169,3 +169,7 @@ class RealtimeSessionResponse(CamelModel):
     client_secret: str = Field(description="브라우저가 OpenAI Realtime 에 직접 붙을 임시 키")
     expires_at: int
     model: str
+
+
+class SynthesizeRequest(CamelModel):
+    text: str = Field(min_length=1, max_length=2000, description="음성으로 읽어줄 문장")
