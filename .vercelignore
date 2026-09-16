@@ -1,0 +1,9 @@
+.venv/
+.venv-1/
+data/
+tests/
+.pytest_cache/
+.ruff_cache/
+.github/
+.vscode/
+구조도_v6_1.html

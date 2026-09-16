@@ -36,6 +36,9 @@ def configure(url: str | None = None) -> Engine:
             kwargs["poolclass"] = StaticPool
         else:
             Path(url.split("///", 1)[-1]).parent.mkdir(parents=True, exist_ok=True)
+    else:
+        # Supabase 등 원격 Postgres — 서버리스 콜드 스타트 사이 끊긴 커넥션을 재사용하지 않도록 확인 후 사용
+        kwargs["pool_pre_ping"] = True
     _engine = create_engine(url, **kwargs)
     _factory = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine

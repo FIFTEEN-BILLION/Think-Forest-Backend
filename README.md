@@ -128,12 +128,25 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 | `AI_ENABLED` / `SPEECH_ENABLED` | `true` | 즉시 차단 스위치 |
 | `DAILY_AI_CALL_LIMIT` | `300` | 아이별 하루 AI 호출 한도 |
 | `TALK_MIN_SECONDS` | `900` | 한 이야기 필수 대화 시간(초) |
-| `DATABASE_URL` | `sqlite:///./data/thinkforest.db` | 운영은 PostgreSQL 주소 |
+| `DATABASE_URL` | `sqlite:///./data/thinkforest.db` | 운영은 Supabase Postgres 주소(`postgresql+psycopg://...`). 서버리스에서는 Supabase **Connection Pooler**(6543 포트, `?pgbouncer=true`) 사용 권장 |
 | `CORS_ORIGINS` | `http://localhost:5173` | 쉼표 구분, `*` 금지 |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | (없음) / `claude-sonnet-5` | 초기 체험 기능 |
 | `TYPECAST_API_KEY` | (없음) | 없으면 음성 합성 `no_api_key` 실패 |
 | `TYPECAST_VOICE_ID` | (없음) | 고정 보이스(예: 이현). [Typecast 콘솔](https://typecast.ai) 또는 `GET /v2/voices` 로 확인 |
 | `TYPECAST_MODEL` | `ssfm-v30` | TTS 모델 |
+
+---
+
+## 배포 (Vercel + Supabase)
+
+서버리스 함수(`api/index.py` → `app.main:app`)로 Vercel 에 올린다. Vercel 의 파일시스템은 쓰기 불가·요청 간 유지도 안 되므로 SQLite 가 아니라 Supabase Postgres 를 쓴다.
+
+1. [Supabase](https://supabase.com) 에서 프로젝트를 만들고 `Project Settings → Database → Connection string` 에서 **Connection Pooler**(Transaction 모드, 6543 포트) 주소를 받는다.
+2. Vercel 에 이 저장소를 연결하고(Root Directory 는 그대로 `backend`), 아래 환경변수를 Production/Preview 각각 등록한다: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `TYPECAST_API_KEY`, `TYPECAST_VOICE_ID`, `DATABASE_URL`(1번의 pooler 주소, `postgresql+psycopg://` 스킴), `CORS_ORIGINS`(배포된 프론트 도메인, `*` 금지).
+3. `vercel --prod` 로 배포하거나 GitHub 연동 시 `main` 푸시로 자동 배포한다.
+4. `https://<프로젝트>.vercel.app/health`, `/docs` 로 확인한다.
+
+로컬에서 Supabase 를 테스트하려면 `DATABASE_URL` 을 같은 pooler 주소로 바꿔서 실행하면 된다(SQLite 와 동일하게 `init_db()` 가 테이블을 만든다). 마이그레이션 도구(Alembic)는 아직 없다.
 
 ---
 
@@ -260,11 +273,12 @@ tests/           conftest(메모리 DB·고정 시계) + 기능별 테스트
 **보안·인프라**
 - [ ] 보호자 실제 인증(Supabase Auth 등)과 법정대리인 동의 확인 — 지금은 개발용 토큰(`gt_`/`ct_`)뿐, 실제 신원 확인 없음
 - [ ] `CHILD_DATA_MODE=child` 전환을 위한 OpenAI ZDR(Zero Data Retention) 승인
-- [ ] 배포(HTTPS)와 `CORS_ORIGINS` 배포 도메인 — 아직 어디에도 배포 안 됨
+- [ ] Vercel 실제 배포 실행과 `CORS_ORIGINS` 배포 도메인 등록 — 설정(`vercel.json`, `api/index.py`)은 준비됐지만 아직 실제 배포는 안 함
+- [ ] Supabase 프로젝트 생성과 `DATABASE_URL`(Connection Pooler) 발급 — 계정 필요, 담당자가 직접 진행
 - [ ] 저장소 기본 브랜치를 `develop` 으로 바꾸기(저장소 관리자 설정) — 확인 결과 현재 기본 브랜치가 `feat/jinyoung-backend-init` 로 되어 있음
 
 **데이터 영속화**
-- [ ] PostgreSQL 운영 DB, Alembic 마이그레이션, 보관기간 만료 삭제 배치
+- [ ] Alembic 마이그레이션, 보관기간 만료 삭제 배치 (운영 DB 연결 자체는 준비됨 — `psycopg` 드라이버 추가, `pool_pre_ping` 설정)
 - [ ] 호출 한도·사용량(`services/usage.py`, `services/diagnostics.py`)이 전부 인메모리 — 재시작하면 초기화됨, DB/Redis 로 이전 필요
 
 **안전 필터**
