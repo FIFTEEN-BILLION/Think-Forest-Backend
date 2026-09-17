@@ -6,11 +6,14 @@
 - **생각 친구 대화 엔진 · 그림자 첫 탐구** — OpenAI (`gpt-5.6-luna` 기본)
 - **초기 체험 기능**(진단·채점·실험실·마음극장·리포트) — Anthropic Claude
 
+- 🔗 **백엔드 API (Vercel)**: <https://think-forest-backend.vercel.app> (Swagger: `/docs`)
+- 🌐 **웹 프론트엔드 (Netlify)**: <https://think-kids.netlify.app>
+
 설계 원칙과 코딩 규칙은 [`CLAUDE.md`](./CLAUDE.md)에 있습니다.
 
 ---
 
-## 지금까지 진행한 내용 (2026-09-15 기준)
+## 지금까지 진행한 내용 (2026-09-17 기준)
 
 | 영역 | 내용 | 상태 |
 |---|---|---|
@@ -27,12 +30,13 @@
 | 성장 기록 | 점수 없이 빈도·성취 기준 7가지, 1달 뒤 보호자 AI 상담 | ✅ |
 | 음성 입력 | 녹음 파일 인식, 실시간 인식 임시 키 | ✅ (실제 호출 미검증) |
 | 음성 출력(TTS) | `POST /voice/synthesize` — 문장을 Typecast 로 읽어 줌(voice_id 고정) | ✅ (실제 호출 로컬 검증 완료, 프론트 미연동) |
-| 그림자 첫 탐구 | 헷갈리는 생각 친구를 공정한 실험 증거로 설득(프론트 화면 연결) | ✅ |
+| 그림자 첫 탐구 | 헷갈리는 생각 친구를 공정한 실험 증거로 설득 (실제 OpenAI 연동) | ✅ 실시간 AI 연동·배포 완료 |
+| 배포 & 인프라 | Vercel 서버리스 배포, Supabase Postgres 연동, Netlify 도메인 CORS 허용 | ✅ 배포 완료 |
 | API 문서 | `/docs` 한국어 설명·순서·예시 본문 | ✅ |
 
-**실제 OpenAI 호출 검증 완료(2026-09-15)** — 성인 테스터 계정으로 `POST /talks` → `POST /talks/{id}/turns` 를 반복해 `compose` → 이야기 완성까지 전 과정을 실제 `gpt-5.6-luna` + `omni-moderation-latest` 호출로 확인. `/tech/panel` 기준 25건 전부 성공.
+**실제 OpenAI 호출 및 배포 연동 검증 완료(2026-09-17)** — 성인 테스터 계정으로 `POST /talks` → `POST /talks/{id}/turns` 대화 완주 검증 및 Netlify 웹 프론트엔드(`https://think-kids.netlify.app`)와 Vercel 백엔드(`https://think-forest-backend.vercel.app`)를 연동하여 첫 탐구 v2(그림자 생각친구 설득) 전 과정을 실제 OpenAI 호출로 완주 확인.
 
-**아직 검증하지 못한 것** — 음성 입력(STT) 실제 호출(`POST /speech/transcriptions`·`/speech/realtime-sessions`), 실시간 음성 인식 세션의 한국어 지정 필드, 태블릿 실기기, 운영 DB(PostgreSQL).
+**아직 검증하지 못한 것** — 음성 입력(STT) 실제 호출(`POST /speech/transcriptions`·`/speech/realtime-sessions`), 실시간 음성 인식 세션의 한국어 지정 필드, 태블릿 실기기.
 
 **이번 검증 중 발견한 이슈** — [#10 외모 필터가 "잘 생기다/못 생기다"(동사 "생기다" 일반 활용)를 오탐](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/10), [#11 실제 `.env` 키가 있으면 `no_api_key` 부정 경로 테스트가 깨짐](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/11).
 
@@ -273,12 +277,12 @@ tests/           conftest(메모리 DB·고정 시계) + 기능별 테스트
 **보안·인프라**
 - [ ] 보호자 실제 인증(Supabase Auth 등)과 법정대리인 동의 확인 — 지금은 개발용 토큰(`gt_`/`ct_`)뿐, 실제 신원 확인 없음
 - [ ] `CHILD_DATA_MODE=child` 전환을 위한 OpenAI ZDR(Zero Data Retention) 승인
-- [ ] Vercel 실제 배포 실행과 `CORS_ORIGINS` 배포 도메인 등록 — 설정(`vercel.json`, `api/index.py`)은 준비됐지만 아직 실제 배포는 안 함
-- [ ] Supabase 프로젝트 생성과 `DATABASE_URL`(Connection Pooler) 발급 — 계정 필요, 담당자가 직접 진행
+- [x] 배포(HTTPS)와 `CORS_ORIGINS` 배포 도메인 — Vercel 배포 완료 (`https://think-forest-backend.vercel.app`), Netlify 프론트(`https://think-kids.netlify.app`) 연동 및 CORS 허용 완료
 - [ ] 저장소 기본 브랜치를 `develop` 으로 바꾸기(저장소 관리자 설정) — 확인 결과 현재 기본 브랜치가 `feat/jinyoung-backend-init` 로 되어 있음
 
 **데이터 영속화**
-- [ ] Alembic 마이그레이션, 보관기간 만료 삭제 배치 (운영 DB 연결 자체는 준비됨 — `psycopg` 드라이버 추가, `pool_pre_ping` 설정)
+- [x] PostgreSQL 운영 DB 연결 — Supabase Postgres Connection Pooler 연결 및 `psycopg` 드라이버 적용 완료 (Vercel 배포 연동)
+- [ ] Alembic 마이그레이션, 보관기간 만료 삭제 배치
 - [ ] 호출 한도·사용량(`services/usage.py`, `services/diagnostics.py`)이 전부 인메모리 — 재시작하면 초기화됨, DB/Redis 로 이전 필요
 
 **안전 필터**
@@ -291,5 +295,5 @@ tests/           conftest(메모리 DB·고정 시계) + 기능별 테스트
 - [ ] [#11](https://github.com/FIFTEEN-BILLION/Think-Forest-Backend/issues/11) `.env`에 실제 키가 있으면 깨지는 `no_api_key` 테스트 2건 수정(환경 격리)
 
 **프론트엔드 연동**
-- [ ] 프론트 `feat/backend-api-layer`(API 클라이언트·타입·훅) 브랜치가 아직 `develop`/`main`에 머지되지 않음 — 배포된 사이트가 백엔드를 실제로 호출하려면 먼저 필요
+- [x] 프론트엔드 배포 연동 — Netlify(`https://think-kids.netlify.app`)에서 Vercel 배포 백엔드를 호출하여 실제 OpenAI 연동 첫 탐구 v2 완주 검증 완료
 - [ ] `POST /voice/synthesize`(Typecast TTS)를 화면 어디에 연결할지 결정 — 지금은 범용 엔드포인트만 있고 프론트 연동은 안 됨
