@@ -83,6 +83,14 @@ app/
 - 예외를 삼키지 않는다. 실패는 코드와 함께 응답에 담아 프론트가 표시할 수 있게 한다.
 - 프롬프트 문자열은 라우터가 아니라 별도 모듈에 모은다.
 
+## 생각 친구 대화 엔진 (OpenAI) 규칙
+
+- OpenAI 호출은 `services/llm.py`(`call_structured`), 음성은 `services/speech.py`, 검사는 `services/moderation.py` 만 지난다.
+- 아이 문장·음성을 OpenAI 로 보내기 전에 `auth.ai_block_reason(child)` 를 확인한다. ZDR 전(`CHILD_DATA_MODE=demo`)에는 성인 테스터 계정만 허용.
+- 질문 종류·정리 시점·마치기 조건·성취 기준은 `app/talks/` 결정론 코드가 정한다. AI 출력으로 흐름을 바꾸지 않는다.
+- 민감 주제(`safety/topics.py`)는 LLM 호출 전후 모두 검사한다. 아이 외모·몸·개인정보를 묻는 출력은 버린다.
+- 점수를 만들지 않는다. 빈도와 성취 기준만 센다.
+
 ## 절대 하지 말 것
 
 - ❌ **`.env`를 커밋하기.** push 전 `git status --short`로 확인.
@@ -104,5 +112,6 @@ CORS_ORIGINS=http://localhost:5173
 
 - 엔드포인트를 만들면 `http://127.0.0.1:8000/docs`에서 직접 호출해 확인한다.
 - 응답 스키마를 바꾸면 프론트엔드 `lib/api.ts`도 같이 고친다.
-- 커밋 메시지: `feat:` `fix:` `refactor:` `chore:` `docs:` 접두사. 한글 가능.
-- `main`에 직접 커밋하지 않는다. `feat/<이름>-<기능>` 브랜치에서 작업 후 PR.
+- 커밋 메시지: `<gitmoji> <type>: <한국어 요약>` (예: `✨ feat: 대화 마치기 API 추가`). type 은 feat·fix·refactor·test·docs·chore·ci.
+- 브랜치는 Git Flow 를 따른다. `main`(배포) · `develop`(통합) · `feature/<기능>` · `fix/<내용>` · `docs/<내용>` · `chore/<내용>` 은 `develop` 에서 만들어 `develop` 으로 PR, `release/<버전>` 은 `develop` → `main`, `hotfix/<내용>` 은 `main` 에서 만들어 `main`·`develop` 에 합친다.
+- `main`·`develop` 에 직접 커밋하지 않는다. 앞 기능에 기대는 작업은 앞 브랜치를 base 로 이어 쌓은 PR 로 올린다.
