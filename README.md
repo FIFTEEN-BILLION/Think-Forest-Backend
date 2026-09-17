@@ -132,12 +132,25 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 | `AI_ENABLED` / `SPEECH_ENABLED` | `true` | 즉시 차단 스위치 |
 | `DAILY_AI_CALL_LIMIT` | `300` | 아이별 하루 AI 호출 한도 |
 | `TALK_MIN_SECONDS` | `900` | 한 이야기 필수 대화 시간(초) |
-| `DATABASE_URL` | `sqlite:///./data/thinkforest.db` | 운영은 PostgreSQL 주소 |
+| `DATABASE_URL` | `sqlite:///./data/thinkforest.db` | 운영은 Supabase Postgres 주소(`postgresql+psycopg://...`). 서버리스에서는 Supabase **Connection Pooler**(6543 포트, `?pgbouncer=true`) 사용 권장 |
 | `CORS_ORIGINS` | `http://localhost:5173` | 쉼표 구분, `*` 금지 |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | (없음) / `claude-sonnet-5` | 초기 체험 기능 |
 | `TYPECAST_API_KEY` | (없음) | 없으면 음성 합성 `no_api_key` 실패 |
 | `TYPECAST_VOICE_ID` | (없음) | 고정 보이스(예: 이현). [Typecast 콘솔](https://typecast.ai) 또는 `GET /v2/voices` 로 확인 |
 | `TYPECAST_MODEL` | `ssfm-v30` | TTS 모델 |
+
+---
+
+## 배포 (Vercel + Supabase)
+
+서버리스 함수(`api/index.py` → `app.main:app`)로 Vercel 에 올린다. Vercel 의 파일시스템은 쓰기 불가·요청 간 유지도 안 되므로 SQLite 가 아니라 Supabase Postgres 를 쓴다.
+
+1. [Supabase](https://supabase.com) 에서 프로젝트를 만들고 `Project Settings → Database → Connection string` 에서 **Connection Pooler**(Transaction 모드, 6543 포트) 주소를 받는다.
+2. Vercel 에 이 저장소를 연결하고(Root Directory 는 그대로 `backend`), 아래 환경변수를 Production/Preview 각각 등록한다: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `TYPECAST_API_KEY`, `TYPECAST_VOICE_ID`, `DATABASE_URL`(1번의 pooler 주소, `postgresql+psycopg://` 스킴), `CORS_ORIGINS`(배포된 프론트 도메인, `*` 금지).
+3. `vercel --prod` 로 배포하거나 GitHub 연동 시 `main` 푸시로 자동 배포한다.
+4. `https://<프로젝트>.vercel.app/health`, `/docs` 로 확인한다.
+
+로컬에서 Supabase 를 테스트하려면 `DATABASE_URL` 을 같은 pooler 주소로 바꿔서 실행하면 된다(SQLite 와 동일하게 `init_db()` 가 테이블을 만든다). 마이그레이션 도구(Alembic)는 아직 없다.
 
 ---
 
