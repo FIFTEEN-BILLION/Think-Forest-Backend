@@ -46,11 +46,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 절대 allow_origins=["*"] 로 두지 않는다. CORS_ORIGINS 환경변수와 Vercel 배포 도메인을 허용한다.
+# 절대 allow_origins=["*"] 로 두지 않는다. CORS_ORIGINS 환경변수와 배포 도메인(Netlify, Vercel)을 허용한다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origins=[*settings.cors_origins, "https://think-kids.netlify.app"],
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.netlify\.app",
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Content-Type", "Accept", "Authorization"],
 )
