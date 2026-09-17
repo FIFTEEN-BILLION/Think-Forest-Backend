@@ -27,7 +27,7 @@ DESCRIPTION = """
 | `/guardian/...` | 보호자 토큰 `gt_…` |
 | `/me`, `/onboarding`, `/talks`, `/children/me/...`, `/words/...`, `/speech/...` | 아이 토큰 `ct_…` |
 | `/shares` (둘러보기·신고) | 보호자 또는 아이 토큰 |
-| `/families`, `/missions/...`, `/inquiry/...`, 기존 체험 기능 | 토큰 없음 |
+| `/families`, `/missions/...`, `/inquiry/...`, `/path/...`, 기존 체험 기능 | 토큰 없음 |
 
 ## 응답에서 꼭 볼 필드
 - **`ai`** — `true` 면 실제 AI(OpenAI `gpt-5.6-luna`)가 만든 문장, `false` 면 규칙 기반 대사입니다.
@@ -85,6 +85,11 @@ TAGS: dict[str, tuple[str, str]] = {
     "inquiry": (
         "9. 첫 탐구: 그림자 실험",
         "헷갈리는 생각 친구를 공정한 실험 증거로 설득하는 첫 탐구(프론트 화면과 연결됨). 토큰이 필요 없습니다.",
+    ),
+    "path": (
+        "9. 첫 탐구: 티키 말로 가르치기",
+        "아이가 AI 캐릭터 티키에게 편지 배달 길을 말로 가르칩니다. 티키는 말을 글자 그대로 프로그램으로 옮기고(모호하면 되물음), "
+        "실행 뒤 반응하며, 도착하면 도전 지도를 골라 도발합니다. 실행은 프론트 엔진이 합니다. 토큰이 필요 없습니다.",
     ),
     "diagnostic": ("10. 기존 체험 기능", "초기 버전의 진단·채점·실험실·마음극장·리포트 API (Claude 경로)."),
     "rubric": ("10. 기존 체험 기능", ""),
@@ -344,6 +349,24 @@ OPERATIONS: dict[tuple[str, str], tuple[str, str, str]] = {
         "아이가 아직 확인하지 않은 부분을 겨냥한 새 상황을 줍니다. 친구 예측이 맞는지 아이가 판단합니다.",
         N,
     ),
+    ("POST", "/path/teach"): (
+        "티키에게 말로 가르치기",
+        "아이 말(`text`)과 지금 프로그램(`program`, 최대 8단계)을 받아 티키가 **글자 그대로** 옮긴 결과를 줍니다.\n\n"
+        "- `kind`: `program`(새 전체 프로그램) · `clarify`(뜻이 갈려 되물음, `clarify.options` 2~3개에 각자 프로그램) · `unmapped`(못 알아들음, `program` 그대로)\n"
+        "- 단계: `move`(`count` 1~5 또는 `until: blocked`=쭉) · `turn`(`dir`, 제자리 돌기) · `stop` · `if`(`sensor`·`state`·`then`·`else`) · `repeat`(`body`, 우체국까지 반복)\n"
+        "- \"오른쪽으로 가\" = 오른쪽으로 돌고 1칸. \"오른쪽으로 돌아\" = 돌기만\n"
+        "- 아이가 **말하지 않은 조건·반복은 보태지 않습니다**(누설 검사로 벗겨 냄). 되물음에 답하면 `pendingClarify` 에 담아 보냅니다\n"
+        "- `heard`: 티키가 알아들은 것(최대 4). AI 를 못 쓰면 정규식 파서로 폴백합니다(`source: fallback`)",
+        N,
+    ),
+    ("POST", "/path/react"): (
+        "실행 결과에 티키가 반응하기",
+        "프론트 엔진의 실행 결과(`result.outcome`: arrived·splashed·bumped·ended·loop·tooLong)를 받아 티키 한마디(`tikiLine`)와 질문(`question`)을 줍니다.\n\n"
+        "- 고칠 방법·정답 길은 말하지 않습니다(누설 문장은 템플릿으로 교체)\n"
+        "- 도착했을 때 `challengeCandidates`(엔진이 지금 프로그램으로는 실패함을 확인한 지도, 최대 4)를 주면 하나를 골라 `challengeId`·`challengeLine` 으로 도발합니다\n"
+        "- 후보에 없는 id 는 첫 후보로 바뀌고, 후보가 없으면 둘 다 `null` 입니다",
+        N,
+    ),
     # 10. 기존 체험 기능
     ("POST", "/diagnostic/assess"): ("(기존) 첫 만남 진단", "진단 답변으로 되물음 강도·어휘 수준을 정합니다.", N),
     ("POST", "/rubric/score"): ("(기존) 되물음 채점", "아이 답을 관찰·추론·표현으로 채점하고 되물음을 만듭니다.", N),
@@ -397,6 +420,29 @@ EXAMPLES: dict[tuple[str, str], dict] = {
         "cards": [{"base": _BASE_SETUP, "compare": {**_BASE_SETUP, "brightness": "bright"}}],
         "attempt": 1,
         "inputOrigin": "example",
+    },
+    ("POST", "/path/teach"): {
+        "text": "웅덩이가 있으면 오른쪽으로 돌아, 아니면 앞으로 가",
+        "program": [{"op": "move", "count": 2}],
+        "mapId": "puddle_1",
+        "attempt": 1,
+        "inputOrigin": "example",
+        "pendingClarify": None,
+    },
+    ("POST", "/path/react"): {
+        "text": "쭉 가",
+        "program": [{"op": "move", "until": "blocked"}],
+        "mapId": "puddle_1",
+        "attempt": 2,
+        "inputOrigin": "example",
+        "result": {
+            "outcome": "arrived",
+            "moves": 4,
+            "stopStepLabel": None,
+            "previousOutcome": "splashed",
+            "changedSinceLast": True,
+        },
+        "challengeCandidates": [{"id": "puddle_2", "summary": "웅덩이가 두 개 있는 지도"}],
     },
     ("POST", "/inquiry/challenge"): {
         "beliefId": "brightness_longer",
