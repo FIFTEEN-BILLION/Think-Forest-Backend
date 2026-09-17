@@ -461,6 +461,146 @@ AUTH_HELP = {
 }
 
 
+# --- v1 conversation ---
+_V1C_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1C_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1C_ERRORS = (
+    "오류는 `{error: {code, message, details, requestId}}` 형식입니다. "
+    "다른 사람의 세션은 `404 SESSION_NOT_FOUND`, 끝났거나 취소된 세션은 `409 SESSION_CLOSED`."
+)
+TAGS.update(
+    {
+        "v1-first-greeting": (
+            "v1-2. 티키와 첫인사",
+            "티키가 `자기소개해볼까?`로 시작해 별명·학년/나이·좋아하는 것·그 까닭·키우고 싶은 힘을 한 번에 하나씩 묻습니다. "
+            "모두 채우면 `READY_TO_FINISH`, 완료하면 프로필이 저장되고 `needsFirstGreeting` 이 false 가 됩니다.",
+        ),
+        "v1-conversations": (
+            "v1-3. 티키와 이야기",
+            "주제로 대화하며 학습 차원(EXPERIENCE·IDEA·REASON·ALTERNATIVE·REFLECTION)을 모읍니다. "
+            "모든 차원 + 최소 응답 수 + 실제 대화 시간이 차면 `READY_TO_FINISH`, 끝내면 정리본이 책장에 저장됩니다.",
+        ),
+        "v1-topics": ("v1-4. 주제", "기본 주제 은행과 내가 만든 주제. 직접 입력한 주제는 안전 검사 뒤 저장합니다."),
+        "v1-home": ("v1-5. 홈·내 정보", "홈 화면 조합(추천·이어하기·이번 주 활동)과 로그인 사용자 정보."),
+        "v1-stories": ("v1-6. 나의 책장", "완성한 이야기 목록·상세와 아끼는 기록 표시."),
+    }
+)
+OPERATIONS.update(
+    {
+        ("POST", "/api/v1/first-greeting/sessions"): (
+            "첫인사 시작 또는 이어하기",
+            "진행 중(`ACTIVE`·`READY_TO_FINISH`) 세션이 있으면 그 세션을 돌려주고(`resumed: true`), 없으면 새로 만듭니다. "
+            "첫 메시지는 `자기소개해볼까?`. `Idempotency-Key` 를 보내면 같은 응답을 다시 줍니다.\n\n" + _V1C_ERRORS,
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/first-greeting/sessions/{session_id}"): (
+            "첫인사 복원",
+            "메시지(최신 `limit` 개, 기본 50·최대 100, 오름차순), `currentInteraction`, `profileDraft`, `readiness` 를 줍니다. "
+            "`nextCursor` 를 `messageCursor` 로 보내면 더 오래된 메시지를 줍니다.",
+            _V1C_TOKEN,
+        ),
+        ("POST", "/api/v1/first-greeting/sessions/{session_id}/messages"): (
+            "첫인사 답변 보내기",
+            "아이 답에서 항목을 뽑고 부족한 항목 하나만 다음 질문으로 묻습니다. 같은 `clientMessageId` 는 저장하지 않고 처음 응답을 다시 줍니다.\n\n"
+            "- `endIntentDetected: true` + 준비 완료면 같은 요청에서 완료하고 `completion` 을 함께 줍니다\n"
+            "- 애매한 종료 표현이면 `SINGLE_CHOICE`(END·CONTINUE)로 확인합니다\n"
+            "- 안전하지 않은 입력은 `422 UNSAFE_CONTENT`(원문 저장 안 함), 지난 질문 id 는 `409 QUESTION_MISMATCH`",
+            _V1C_TOKEN,
+        ),
+        ("POST", "/api/v1/first-greeting/sessions/{session_id}/complete"): (
+            "첫인사 완료",
+            "프로필을 확정해 저장합니다. 부족하면 `409 FIRST_GREETING_NOT_READY` + `details.missing`. "
+            "이미 완료된 세션은 처음 결과를 그대로 줍니다.",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/conversations"): (
+            "이야기 대화 목록",
+            "`status=ACTIVE,READY_TO_FINISH` 처럼 쉼표로 거릅니다. 최근 수정순, `cursor`·`limit`(기본 20·최대 50)·`nextCursor`.",
+            _V1C_TOKEN,
+        ),
+        ("POST", "/api/v1/conversations"): (
+            "이야기 대화 시작",
+            "`topicId`(`topic_ice_cup` 같은 은행 주제 또는 `topic_user_…`)로 시작합니다. 첫 질문은 경험을 묻는 `SINGLE_CHOICE` 입니다. "
+            "없는 주제는 `404 TOPIC_NOT_FOUND`.",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/conversations/{conversation_id}"): (
+            "이야기 대화 복원",
+            "메시지(선택지 스냅숏 포함), `currentInteraction`, `readiness`, 완료했다면 `storyId`. `messageCursor`·`limit` 으로 이전 메시지를 봅니다.",
+            _V1C_TOKEN,
+        ),
+        ("POST", "/api/v1/conversations/{conversation_id}/messages"): (
+            "이야기 답변 보내기",
+            "`input.type` 이 `TEXT` 면 `text`, `SINGLE_CHOICE` 면 `optionId`. `questionId` 가 지금 질문이 아니거나 선택지에 없는 `optionId` 면 "
+            "`409 QUESTION_MISMATCH`. 문장이 아닌 짧은 답은 같은 질문을 다시 묻습니다. `READY_TO_FINISH` 뒤에도 계속 보낼 수 있습니다.\n\n"
+            "종료 발화가 준비된 대화에서 오면 같은 요청에서 정리본을 저장하고 `completion` 을 줍니다.",
+            _V1C_TOKEN,
+        ),
+        ("POST", "/api/v1/conversations/{conversation_id}/complete"): (
+            "이야기 완료·정리본 저장",
+            "준비가 안 됐으면 `409 CONVERSATION_NOT_READY` + `missingDimensions`·`remainingResponses`·`remainingSeconds`. "
+            "정리본의 `thoughtJourney` 는 아이 말 인용으로 채우고, AI 정리본 원본은 따로 보관합니다.",
+            _V1C_TOKEN,
+        ),
+        ("POST", "/api/v1/conversations/{conversation_id}/cancel"): (
+            "이야기 대화 그만두기",
+            "원문을 지우지 않고 `CANCELLED` 로 바꿉니다. 이미 완료된 대화는 `409 SESSION_CLOSED`.",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/topics"): (
+            "주제 목록",
+            "`category`, `recommended=true`(오늘의 추천), `query`(제목·첫 질문 검색), `cursor`·`limit`.",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/topics/{topic_id}"): ("주제 상세", "대표 질문(`hook`)과 이어 갈 질문들(`questions`).", _V1C_TOKEN),
+        ("POST", "/api/v1/topics"): (
+            "내 주제 만들기",
+            "안전 검사를 통과하면 저장하고 `topic_user_…` id 를 줍니다. 안전하지 않으면 `422 UNSAFE_TOPIC`(저장 안 함).",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/me"): (
+            "내 정보",
+            "`user{id, role, needsFirstGreeting}` 와 첫인사로 확정한 `profile`(없으면 null).",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/home"): (
+            "홈 화면",
+            "추천 주제 3개(사람이 읽을 `reason` 포함), 이어하기(`resume`), 최근 7일(KST) 활동. `recentWords`·`communityStories` 는 아직 빈 배열입니다.",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/stories"): (
+            "나의 책장",
+            "`query`, `category`, `favorite`, `from`·`to`(KST 날짜), `cursor`·`limit`. 최근 수정순.",
+            _V1C_TOKEN,
+        ),
+        ("GET", "/api/v1/stories/{story_id}"): (
+            "이야기 한 편",
+            "제목·요약·본문·생각 과정(`thoughtJourney`)·원본 대화 id. 다른 사람 이야기는 `404 STORY_NOT_FOUND`.",
+            _V1C_TOKEN,
+        ),
+        ("PUT", "/api/v1/stories/{story_id}/favorite"): ("아끼는 기록 등록", "여러 번 불러도 결과가 같습니다.", _V1C_TOKEN),
+        ("DELETE", "/api/v1/stories/{story_id}/favorite"): ("아끼는 기록 해제", "여러 번 불러도 결과가 같습니다.", _V1C_TOKEN),
+    }
+)
+EXAMPLES.update(
+    {
+        ("POST", "/api/v1/first-greeting/sessions/{session_id}/messages"): {
+            "clientMessageId": "device-uuid-7",
+            "input": {"type": "TEXT", "text": "나는 별이라고 불러 줘. 2학년이고 공룡을 좋아해."},
+        },
+        ("POST", "/api/v1/first-greeting/sessions/{session_id}/complete"): {"trigger": "BUTTON"},
+        ("POST", "/api/v1/conversations"): {"topicId": "topic_ice_cup", "inputMode": "TEXT", "locale": "ko-KR"},
+        ("POST", "/api/v1/conversations/{conversation_id}/messages"): {
+            "clientMessageId": "device-uuid-13",
+            "questionId": "여기에_currentInteraction.questionId",
+            "input": {"type": "SINGLE_CHOICE", "optionId": "SEEN"},
+        },
+        ("POST", "/api/v1/conversations/{conversation_id}/complete"): {"trigger": "BUTTON"},
+        ("POST", "/api/v1/topics"): {"title": "무지개는 왜 여러 색으로 보일까?", "category": "SCIENCE"},
+    }
+)
+# --- end v1 conversation ---
+
 def install(app: FastAPI) -> None:
     """생성된 스키마에 한국어 이름·설명·예시를 덧붙이는 openapi 함수로 바꾼다."""
 
