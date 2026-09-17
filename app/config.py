@@ -38,6 +38,11 @@ class Settings(BaseModel):
     speech_enabled: bool = True
     daily_ai_call_limit: int = 300
     talk_min_seconds: int = 900  # 한 이야기 필수 15분(실제 대화한 시간 기준)
+    # --- v1 conversation ---
+    # 티키와 이야기 READY_TO_FINISH 조건: 모든 학습 차원 + 유효 응답 수 + 실제 대화 시간(초)
+    conversation_min_responses: int = 6
+    conversation_min_seconds: int = 300
+    # --- end v1 conversation ---
     # 텍스트 → 음성(Typecast). voice_id 는 콘솔/GET https://api.typecast.ai/v2/voices 에서 확인.
     typecast_api_key: str | None = None
     typecast_voice_id: str | None = None
@@ -86,6 +91,10 @@ def get_settings() -> Settings:
         speech_enabled=_flag(os.getenv("SPEECH_ENABLED")),
         daily_ai_call_limit=int(os.getenv("DAILY_AI_CALL_LIMIT") or 300),
         talk_min_seconds=int(os.getenv("TALK_MIN_SECONDS") or 900),
+        # --- v1 conversation ---
+        conversation_min_responses=int(os.getenv("CONVERSATION_MIN_RESPONSES") or 6),
+        conversation_min_seconds=int(os.getenv("CONVERSATION_MIN_SECONDS") or 300),
+        # --- end v1 conversation ---
         typecast_api_key=os.getenv("TYPECAST_API_KEY") or None,
         typecast_voice_id=os.getenv("TYPECAST_VOICE_ID") or None,
         typecast_model=os.getenv("TYPECAST_MODEL") or "ssfm-v30",
