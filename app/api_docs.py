@@ -98,9 +98,18 @@ TAGS: dict[str, tuple[str, str]] = {
     "report": ("10. 기존 체험 기능", ""),
     "tech": ("11. 서버 상태", "서버 동작 확인과 AI 호출·차단 로그."),
     "health": ("11. 서버 상태", ""),
+    # --- v1 auth ---
+    "v1-auth": (
+        "12. JJCP v1 로그인",
+        "카카오 웹·모바일 로그인, JJCP access/refresh token 갱신·로그아웃, 개발용 로그인. 경로는 `/api/v1/auth/...`.",
+    ),
+    # --- /v1 auth ---
 }
 
 G, C, V, N = "보호자 토큰 `gt_…`", "아이 토큰 `ct_…`", "보호자 또는 아이 토큰", "토큰 없음"
+# --- v1 auth ---
+V1_ACCESS = "JJCP access token `jat_…`"
+# --- /v1 auth ---
 
 # (메서드, 경로) → (요약, 설명, 토큰)
 OPERATIONS: dict[tuple[str, str], tuple[str, str, str]] = {
@@ -378,6 +387,51 @@ OPERATIONS: dict[tuple[str, str], tuple[str, str, str]] = {
     # 11. 서버 상태
     ("GET", "/tech/panel"): ("기술·안전 패널", "AI 호출 수·지연·실패 코드와 차단 로그.", N),
     ("GET", "/health"): ("서버 켜짐 확인", "`{\"ok\": true}` 면 정상입니다.", N),
+    # --- v1 auth ---
+    ("GET", "/api/v1/auth/kakao/authorize"): (
+        "v1 웹 카카오 로그인 시작",
+        "`returnTo`(같은 출처 상대 경로, 아니면 `/`)를 기억하고 카카오 인가 화면으로 **302** 이동합니다. "
+        "state(10분·1회용)와 PKCE(S256)를 씁니다.\n\n"
+        "카카오 설정이 없으면 `503 AUTH_PROVIDER_UNAVAILABLE`. Swagger 에서는 리다이렉트를 따라가지 않으니 브라우저 주소창에서 여세요.",
+        N,
+    ),
+    ("GET", "/api/v1/auth/kakao/callback"): (
+        "v1 웹 카카오 로그인 콜백",
+        "카카오가 호출합니다. state 검증 → 토큰 교환 → 회원 찾기/만들기 → refresh token 을 HttpOnly 쿠키 "
+        "`jjcp_refresh`(Path=/api/v1/auth, SameSite=Lax)에 넣고 `returnTo` 로 302 이동합니다.\n\n"
+        "access token 은 주지 않습니다. 화면에서 `POST /api/v1/auth/token/refresh` 를 불러 받으세요. "
+        "실패하면 `returnTo?loginError=INVALID_STATE|KAKAO_CANCELLED|KAKAO_LOGIN_FAILED|AUTH_PROVIDER_UNAVAILABLE` 로 이동합니다.",
+        N,
+    ),
+    ("POST", "/api/v1/auth/kakao/mobile"): (
+        "v1 모바일 카카오 로그인",
+        "앱의 카카오 SDK 로그인으로 받은 카카오 access token 을 서버가 카카오에서 확인한 뒤 JJCP 토큰을 줍니다. "
+        "응답 본문에 `refreshToken` 이 들어 있으니 OS 보안 저장소에 두세요.\n\n"
+        "카카오 토큰이 무효면 `401 UNAUTHORIZED`, 카카오 장애·설정 없음은 `503 AUTH_PROVIDER_UNAVAILABLE`.",
+        N,
+    ),
+    ("POST", "/api/v1/auth/token/refresh"): (
+        "v1 access token 갱신",
+        "refresh token 으로 새 access token(1시간)을 받습니다. refresh token 도 매번 새로 바뀝니다.\n\n"
+        "- **웹**: 본문 없이 호출 → 쿠키 `jjcp_refresh` 사용, 새 쿠키로 교체, 본문에 `refreshToken` 없음\n"
+        "- **모바일**: 본문 `refreshToken` → 본문에 새 `refreshToken`\n\n"
+        "이미 한 번 쓴 refresh token 을 다시 보내면 그 로그인 세션 전체가 폐기됩니다(`401`).",
+        N,
+    ),
+    ("POST", "/api/v1/auth/logout"): (
+        "v1 로그아웃",
+        "본문 `refreshToken` 또는 쿠키의 세션과 그 세션의 access token 을 모두 폐기하고 쿠키를 지웁니다. "
+        "`logoutFromKakao: true` 는 아직 지원하지 않아 `400 INVALID_INPUT` 입니다.",
+        V1_ACCESS,
+    ),
+    ("POST", "/api/v1/auth/dev/login"): (
+        "v1 개발용 로그인 (AUTH_DEV_LOGIN=true 일 때만)",
+        "카카오 없이 테스트 계정으로 로그인합니다. 같은 `deviceKey`(8~128자)는 같은 사용자입니다. "
+        "성인 테스터 계정이라 demo 모드에서도 실제 AI 를 씁니다.\n\n"
+        "응답은 웹 갱신과 같습니다: 본문 `accessToken`, refresh token 은 쿠키로만. 꺼져 있으면 `404`.",
+        N,
+    ),
+    # --- /v1 auth ---
 }
 
 _BASE_SETUP = {"lightHeight": "mid", "stickHeight": "short", "distance": "near", "brightness": "dim"}
@@ -452,6 +506,16 @@ EXAMPLES: dict[tuple[str, str], dict] = {
         "finalReason": "빛의 높이만 바꾼 실험에서 봤어",
         "inputOrigin": "example",
     },
+    # --- v1 auth ---
+    ("POST", "/api/v1/auth/kakao/mobile"): {
+        "platform": "ANDROID",
+        "kakaoAccessToken": "카카오_SDK_로그인으로_받은_access_token",
+        "device": {"installationId": "01K0EXAMPLE", "appVersion": "1.0.0"},
+    },
+    ("POST", "/api/v1/auth/token/refresh"): {"refreshToken": "jrt_… (웹은 비워 두면 쿠키를 씀)"},
+    ("POST", "/api/v1/auth/logout"): {"refreshToken": "jrt_… (웹은 생략)", "logoutFromKakao": False},
+    ("POST", "/api/v1/auth/dev/login"): {"deviceKey": "my-laptop-test-01", "nickname": "테스터"},
+    # --- /v1 auth ---
 }
 
 AUTH_HELP = {
@@ -459,6 +523,10 @@ AUTH_HELP = {
     C: "아이 토큰. `Bearer ct_…` 형식으로 넣으세요 (`POST /guardian/children/{child_id}/devices` 응답의 childToken).",
     V: "보호자 토큰(`Bearer gt_…`) 또는 아이 토큰(`Bearer ct_…`).",
 }
+
+# --- v1 auth ---
+AUTH_HELP[V1_ACCESS] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+# --- /v1 auth ---
 
 
 def install(app: FastAPI) -> None:
