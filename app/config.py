@@ -42,6 +42,20 @@ class Settings(BaseModel):
     typecast_api_key: str | None = None
     typecast_voice_id: str | None = None
     typecast_model: str = "ssfm-v30"
+    # --- v1 auth ---
+    # 카카오 로그인(REST API 키·Redirect URI 가 없으면 authorize·callback·mobile 은 503).
+    kakao_rest_api_key: str | None = None
+    kakao_client_secret: str | None = None
+    kakao_redirect_uri: str | None = None
+    # 모바일 토큰 검증 시 access_token_info.app_id 와 비교한다. 운영에서는 반드시 설정한다.
+    kakao_app_id: str | None = None
+    # 로그인 뒤 돌아갈 프론트 주소. 비우면 같은 출처 상대 경로로 이동한다.
+    frontend_base_url: str = ""
+    # 개발용 로그인(POST /api/v1/auth/dev/login). 운영에서는 끈다.
+    auth_dev_login: bool = False
+    # refresh 쿠키 Secure 속성. http 로컬 개발에서만 false.
+    auth_cookie_secure: bool = True
+    # --- /v1 auth ---
 
     @property
     def ai_enabled(self) -> bool:
@@ -89,6 +103,15 @@ def get_settings() -> Settings:
         typecast_api_key=os.getenv("TYPECAST_API_KEY") or None,
         typecast_voice_id=os.getenv("TYPECAST_VOICE_ID") or None,
         typecast_model=os.getenv("TYPECAST_MODEL") or "ssfm-v30",
+        # --- v1 auth ---
+        kakao_rest_api_key=os.getenv("KAKAO_REST_API_KEY") or None,
+        kakao_client_secret=os.getenv("KAKAO_CLIENT_SECRET") or None,
+        kakao_redirect_uri=os.getenv("KAKAO_REDIRECT_URI") or None,
+        kakao_app_id=os.getenv("KAKAO_APP_ID") or None,
+        frontend_base_url=(os.getenv("FRONTEND_BASE_URL") or "").rstrip("/"),
+        auth_dev_login=_flag(os.getenv("AUTH_DEV_LOGIN"), default=False),
+        auth_cookie_secure=_flag(os.getenv("AUTH_COOKIE_SECURE")),
+        # --- /v1 auth ---
     )
 
 
