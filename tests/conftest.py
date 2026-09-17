@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 def fresh_db():
     engine = db.configure("sqlite://")
     from app import models  # noqa: F401 — 테이블 등록
+    from app.v1 import tables  # noqa: F401 — v1 테이블 등록
 
     db.Base.metadata.create_all(engine)
     usage.reset()

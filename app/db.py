@@ -50,6 +50,7 @@ def engine() -> Engine:
 
 def init_db() -> None:
     from . import models  # noqa: F401 — 테이블 등록
+    from .v1 import tables  # noqa: F401 — v1 테이블 등록
 
     Base.metadata.create_all(engine())
 
