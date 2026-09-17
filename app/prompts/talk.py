@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from .shared import FACT_RULE, SAFETY_RULE
 
-BASE = f"""너는 초등학교 2~4학년(8~10살) 아이와 이야기하는 AI 캐릭터 '생각 친구'다.
+
+def base_rules(character: str = "생각 친구", audience: str = "초등학교 2~4학년(8~10살)") -> str:
+    """대화 공통 규칙. 캐릭터 이름과 대상 학년만 바꿔 v1 티키 대화에서도 같은 안전·말하기 규칙을 쓴다."""
+    return f"""너는 {audience} 아이와 이야기하는 AI 캐릭터 '{character}'다.
 출력은 지정된 JSON 스키마를 따른다.
 
 [목표]
@@ -23,6 +26,9 @@ BASE = f"""너는 초등학교 2~4학년(8~10살) 아이와 이야기하는 AI �
 - {FACT_RULE}
 - {SAFETY_RULE}
 """
+
+
+BASE = base_rules()
 
 DIARY_NOTE = "\n[일기 대화]\n- 오늘 있었던 일을 나누는 대화다. 아이의 경험과 마음을 존중하고, 있었던 일을 바꾸거나 판단하지 않는다.\n"
 

@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-import re
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -43,7 +41,7 @@ from ..services.llm import LlmError, call_structured
 from ..talks import planner
 from ..talks import plot as plots
 from ..talks import topics as bank
-from ..talks.sentences import EXPAND_LINES, check_sentence, has_reason, sentence_count, starters_for
+from ..talks.sentences import EXPAND_LINES, MORE, check_sentence, has_reason, sentence_count, stance_of, starters_for
 from .categories import category_list
 
 router = APIRouter(tags=["talks"])
@@ -52,9 +50,6 @@ MAX_AI_CALLS_PER_TALK = 60
 HISTORY_TURNS = 8
 SAFE_PLACEHOLDER = "(안전을 위해 저장하지 않은 말)"
 STORY_DONE_LINE = "우리 대화로 이야기 한 편을 완성했어!"
-_CHANGED = re.compile(r"바꿀|바꿔|바뀌|달라졌|다르게\s*생각")
-_KEPT = re.compile(r"그대로|맞다고|믿어|안\s*바꿀|계속\s*같")
-_MORE = re.compile(r"그리고|또|아니면|만약|예를\s*들면|게다가")
 
 
 # --- 직렬화 -----------------------------------------------------------------
@@ -455,10 +450,10 @@ def take_turn(
             category = "self_harm" if self_harm else "moderation"
             return redirect(category, self_harm, sensitive.REDIRECTS[category])
 
-    stance = "changed" if _CHANGED.search(text) else "kept" if _KEPT.search(text) else "none"
+    stance = stance_of(text)
     meta = {
         "reason_given": has_reason(text),
-        "new_idea": bool(_MORE.search(text)) or has_reason(text),
+        "new_idea": bool(MORE.search(text)) or has_reason(text),
         "stance": stance if pending_move == "reason_check" else "none",
         "sentences": sentence_count(text),
         "source": "rule",

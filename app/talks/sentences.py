@@ -14,6 +14,10 @@ _ENDING = re.compile(
 )
 _UNSURE = re.compile(r"^(몰라|모르겠|글쎄|음+|그냥)")
 _REASON = re.compile(r"왜냐하면|때문|그래서|니까|거든|라서|해서|어서|아서")
+# 생각 지키기/바꾸기와 새 생각 보태기 신호. 기존 대화(/talks)와 v1 이야기 대화가 함께 쓴다.
+CHANGED = re.compile(r"바꿀|바꿔|바뀌|달라졌|다르게\s*생각")
+KEPT = re.compile(r"그대로|맞다고|믿어|안\s*바꿀|계속\s*같")
+MORE = re.compile(r"그리고|또|아니면|만약|예를\s*들면|게다가")
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,13 @@ def sentence_count(text: str) -> int:
 
 def has_reason(text: str) -> bool:
     return bool(_REASON.search(text or ""))
+
+
+def stance_of(text: str) -> str:
+    """changed|kept|none — 규칙으로 읽은 생각 지키기/바꾸기."""
+    if CHANGED.search(text or ""):
+        return "changed"
+    return "kept" if KEPT.search(text or "") else "none"
 
 
 EXPAND_LINES: dict[str, str] = {
