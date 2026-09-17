@@ -211,7 +211,7 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 | `POST /voice/synthesize` | 아이 | 문장을 음성(mp3/wav)으로 읽어 줌(Typecast, voice_id 고정) — JSON 아닌 오디오 바이너리 응답 |
 | `POST/GET /guardian/children/{id}/consultations` | 보호자 | 1달 뒤 AI 상담 |
 
-### 그림자 첫 탐구 (토큰 없음)
+### 그림자·길 찾기 첫 탐구 (토큰 없음)
 
 | 엔드포인트 | 하는 일 |
 |---|---|
@@ -219,6 +219,8 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 | `POST /inquiry/interpret` | 처음 생각 이해 + 아이와 다른 친구 생각 |
 | `POST /inquiry/teach` | 실험 카드로 친구 설득(규칙 판정) |
 | `POST /inquiry/challenge` | 친구의 새 예측 |
+| `POST /path/teach` | 티키 말로 가르치기: 아이 말 → 글자 그대로 프로그램 / 되묻기 / 못 알아들음 |
+| `POST /path/react` | 실행 결과에 티키 반응 + 도착 시 도전 지도 고르기 |
 
 ### 초기 체험 기능 (Claude)
 
