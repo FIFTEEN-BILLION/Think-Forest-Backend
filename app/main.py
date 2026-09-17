@@ -19,6 +19,7 @@ from .routers import (
     lab,
     library,
     onboarding,
+    path,
     progress,
     report,
     rubric,
@@ -62,6 +63,7 @@ app.include_router(lab.router)
 app.include_router(report.router)
 app.include_router(tech.router)
 app.include_router(inquiry.router)
+app.include_router(path.router)
 # 생각 친구 대화 엔진
 app.include_router(families.router)
 app.include_router(onboarding.router)
