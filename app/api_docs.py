@@ -669,6 +669,134 @@ EXAMPLES.update(
 )
 # --- end v1 conversation ---
 
+
+# --- v1 library ---
+_V1L_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1L_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1L_ERRORS = (
+    "오류는 `{error: {code, message, details, requestId}}` 형식입니다. "
+    "다른 아이의 기록은 `404`(있다는 사실도 알리지 않습니다), 먼저 고쳐진 기록은 `409 VERSION_CONFLICT`."
+)
+TAGS.update(
+    {
+        "v1-wordbook": (
+            "v1-7. 단어장·단어 퀴즈",
+            "대화에서 만난 낱말을 담고(뜻풀이는 티키가), 복습 퀴즈로 다시 만납니다. "
+            "점수는 만들지 않습니다 — 맞히면 낱말 상태(NEW→PRACTICING→FAMILIAR)가 오르고 다음 복습이 멀어집니다.",
+        ),
+        "v1-books": (
+            "v1-8. 이야기책",
+            "완성한 이야기를 골라 한 권으로 묶습니다. 책을 지워도 이야기는 책장에 그대로 남습니다.",
+        ),
+    }
+)
+OPERATIONS.update(
+    {
+        ("PATCH", "/api/v1/stories/{story_id}"): (
+            "이야기 고쳐 쓰기",
+            "아이가 제목·요약·본문·`thoughtJourney` 를 자기 말로 고칩니다. AI 정리본 원본은 따로 보관되어 바뀌지 않습니다.\n\n"
+            "지금 보고 있는 판을 `If-Match: \"3\"` 헤더나 본문 `version` 으로 함께 보냅니다. 값이 다르면 `409 VERSION_CONFLICT` "
+            "(`details.currentVersion`), 아예 없으면 `400 INVALID_INPUT`. 저장되면 `version` 이 1 올라갑니다.\n\n" + _V1L_ERRORS,
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/stories/{story_id}"): (
+            "이야기 지우기",
+            "이야기를 지웁니다(`204`). 담겨 있던 이야기책에서는 빠지지만 책과 다른 이야기는 남습니다. 공유된 글도 함께 내립니다.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/wordbook"): (
+            "단어장",
+            "`summary`(전체·상태별·복습할 때가 된 개수) + `items` + `nextCursor`. `status`(NEW·PRACTICING·FAMILIAR), "
+            "`query`(낱말·뜻 검색), `cursor`·`limit`(기본 20·최대 50). 최근 바뀐 순.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/wordbook/entries"): (
+            "낱말 담기",
+            "대화 메시지(`messageId`)에 실제로 나온 낱말만 담을 수 있습니다(아니면 `400 INVALID_INPUT`). "
+            "뜻풀이는 티키가 만들고, AI 를 못 쓰면 검수 사전이나 '내 말로 적어 보기' 문장으로 이어 갑니다(`source`).\n\n"
+            "이미 담은 낱말이면 `200` 으로 그 낱말을 그대로 돌려줍니다. `Idempotency-Key` 를 보내면 같은 응답을 다시 줍니다.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/wordbook/entries/{entry_id}"): ("낱말 하나", "뜻·예문·내 문장·상태·다음 복습 시각.", _V1L_TOKEN),
+        ("PATCH", "/api/v1/wordbook/entries/{entry_id}"): (
+            "낱말 고치기",
+            "`status`(NEW·PRACTICING·FAMILIAR)를 직접 바꾸거나 `mySentence`(내가 만든 문장)를 적습니다. "
+            "상태를 바꾸면 다음 복습 시각도 함께 옮겨집니다.",
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/wordbook/entries/{entry_id}"): ("낱말 지우기", "단어장에서 지웁니다(`204`).", _V1L_TOKEN),
+        ("POST", "/api/v1/word-quizzes"): (
+            "단어 퀴즈 만들기",
+            "내 단어장에 담긴 낱말로만 냅니다. 복습할 때가 된 낱말이 먼저 나옵니다. `count`(기본 5·최대 10), "
+            "`mode`(`MEANING_TO_WORD`·`WORD_TO_MEANING`·`FILL_IN_BLANK`), `status`(그 상태의 낱말로만).\n\n"
+            "담은 낱말이 없으면 `409 NO_WORDS_TO_QUIZ`. 정답 보기 id 는 응답에 들어 있지 않습니다.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/word-quizzes/{quiz_id}/answers"): (
+            "퀴즈 한 문제 답하기",
+            "문항 하나에 답합니다. 점수를 매기지 않고 낱말 상태와 다음 복습 시각만 바꿉니다(맞히면 한 칸 위, 틀리면 한 칸 아래). "
+            "같은 문항에 다시 답하면 `409 ALREADY_ANSWERED`.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/books"): ("이야기책 목록", "`status`(DRAFT·COMPLETED), `cursor`·`limit`. 최근 바뀐 순.", _V1L_TOKEN),
+        ("POST", "/api/v1/books"): (
+            "이야기책 만들기",
+            "`storyIds` 순서대로 담습니다. `generateIntroduction: true` 면 머리말을 티키가 쓰고, AI 를 못 쓰면 "
+            "담긴 이야기 제목으로 만든 문장을 넣습니다(`introductionSource`). `Idempotency-Key` 를 지원합니다.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/books/{book_id}"): ("이야기책 보기", "책 정보와 담긴 이야기를 순서대로 줍니다.", _V1L_TOKEN),
+        ("PATCH", "/api/v1/books/{book_id}"): (
+            "이야기책 고치기",
+            "`title`·`introduction`·`cover`·`storyIds`(지금 담긴 이야기들의 새 순서). 이야기를 더하고 빼는 것은 전용 엔드포인트로 합니다.\n\n"
+            "`If-Match` 헤더나 본문 `version` 이 필요합니다(다르면 `409 VERSION_CONFLICT`). 완성한 책은 `409 BOOK_COMPLETED`.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/books/{book_id}/stories"): (
+            "책에 이야기 담기",
+            "`position` 을 주면 그 자리에, 없으면 맨 뒤에 담습니다. 이미 담긴 이야기는 `409 STORY_ALREADY_IN_BOOK`.",
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/books/{book_id}/stories/{story_id}"): (
+            "책에서 이야기 빼기",
+            "책에서만 빼냅니다. 이야기는 책장에 그대로 남습니다.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/books/{book_id}/complete"): (
+            "이야기책 완성",
+            "다 만들었다고 표시합니다. 빈 책은 `409 BOOK_EMPTY`. 이미 완성한 책을 다시 불러도 같은 결과를 줍니다.",
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/books/{book_id}"): (
+            "이야기책 지우기",
+            "책만 지웁니다(`204`). 담겨 있던 이야기는 책장에 그대로 남습니다.",
+            _V1L_TOKEN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("PATCH", "/api/v1/stories/{story_id}"): {"title": "차가운 컵에 생긴 물방울", "version": 1},
+        ("POST", "/api/v1/wordbook/entries"): {"word": "수증기", "messageId": "여기에_message_id"},
+        ("PATCH", "/api/v1/wordbook/entries/{entry_id}"): {
+            "status": "PRACTICING",
+            "mySentence": "아침에 유리창에 수증기가 맺혔다.",
+        },
+        ("POST", "/api/v1/word-quizzes"): {"count": 3, "mode": "MEANING_TO_WORD"},
+        ("POST", "/api/v1/word-quizzes/{quiz_id}/answers"): {"questionId": "여기에_question_id", "optionId": "A"},
+        ("POST", "/api/v1/books"): {
+            "title": "나의 과학 이야기책",
+            "storyIds": ["여기에_story_id"],
+            "generateIntroduction": True,
+            "cover": {"theme": "밤하늘", "emoji": "🌙"},
+        },
+        ("PATCH", "/api/v1/books/{book_id}"): {"title": "내가 만든 과학책", "version": 1},
+        ("POST", "/api/v1/books/{book_id}/stories"): {"storyId": "여기에_story_id", "position": 0},
+    }
+)
+# --- end v1 library ---
+
+
 # --- v1 activities ---
 _V1A_TOKEN = "JJCP access token `jat_…`"
 AUTH_HELP[_V1A_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
@@ -803,6 +931,7 @@ EXAMPLES.update(
     }
 )
 # --- end v1 activities ---
+
 
 def install(app: FastAPI) -> None:
     """생성된 스키마에 한국어 이름·설명·예시를 덧붙이는 openapi 함수로 바꾼다."""
