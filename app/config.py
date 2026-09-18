@@ -78,6 +78,32 @@ class Settings(BaseModel):
     # 삭제·탈퇴 요청에 필요한 재인증: 이 시간보다 오래된 access token 이면 다시 로그인하게 한다.
     ops_reauth_max_age_seconds: int = 900
     # --- /v1 ops ---
+    # --- v1 social ---
+    # 운영자 허용 목록 — 카카오 회원번호를 쉼표로 (ADMIN_KAKAO_IDS=12345,67890). 비어 있으면 운영자가 없다.
+    # 친구 이야기 신고가 이 수에 닿으면 공개본을 자동으로 숨기고 운영자 검토 대기로 보낸다.
+    community_report_hide_threshold: int = 3
+    # 보호자 월간 상담: 첫 기록 뒤 이 일수가 지나야 만들 수 있다(그리고 한 달에 한 번).
+    consultation_min_days: int = 30
+    # 성장 리포트 요약을 만들려면 기간 안에 이야기가 최소 이만큼 있어야 한다.
+    report_summary_min_stories: int = 1
+    # --- end v1 social ---
+    # --- v1 activities ---
+    # 운영자 허용 목록(`/admin/topic-schedules`). 카카오 회원번호를 쉼표로 나눠 적는다.
+    # B3 트랙도 같은 키를 쓴다 — 이름을 바꾸지 말 것(ADMIN_KAKAO_IDS).
+    admin_kakao_ids: tuple[str, ...] = ()
+    # --- /v1 activities ---
+    # --- v1 library ---
+    # 단어장 복습 간격(일). 상태가 오를수록 다음 복습이 멀어진다.
+    wordbook_review_days_new: int = 1
+    wordbook_review_days_practicing: int = 3
+    wordbook_review_days_familiar: int = 7
+    # 단어 퀴즈 한 판의 문항 수(기본·최대)와 보기 수.
+    word_quiz_default_count: int = 5
+    word_quiz_max_count: int = 10
+    word_quiz_option_count: int = 4
+    # 이야기책 한 권에 담을 수 있는 이야기 수.
+    story_book_max_stories: int = 30
+    # --- end v1 library ---
 
     @property
     def ai_enabled(self) -> bool:
@@ -159,6 +185,23 @@ def get_settings() -> Settings:
         account_deletion_grace_days=int(os.getenv("ACCOUNT_DELETION_GRACE_DAYS") or 30),
         ops_reauth_max_age_seconds=int(os.getenv("OPS_REAUTH_MAX_AGE_SECONDS") or 900),
         # --- /v1 ops ---
+        # --- v1 social ---
+        community_report_hide_threshold=int(os.getenv("COMMUNITY_REPORT_HIDE_THRESHOLD") or 3),
+        consultation_min_days=int(os.getenv("CONSULTATION_MIN_DAYS") or 30),
+        report_summary_min_stories=int(os.getenv("REPORT_SUMMARY_MIN_STORIES") or 1),
+        # --- end v1 social ---
+        # --- v1 activities ---
+        admin_kakao_ids=tuple(i.strip() for i in (os.getenv("ADMIN_KAKAO_IDS") or "").split(",") if i.strip()),
+        # --- /v1 activities ---
+        # --- v1 library ---
+        wordbook_review_days_new=int(os.getenv("WORDBOOK_REVIEW_DAYS_NEW") or 1),
+        wordbook_review_days_practicing=int(os.getenv("WORDBOOK_REVIEW_DAYS_PRACTICING") or 3),
+        wordbook_review_days_familiar=int(os.getenv("WORDBOOK_REVIEW_DAYS_FAMILIAR") or 7),
+        word_quiz_default_count=int(os.getenv("WORD_QUIZ_DEFAULT_COUNT") or 5),
+        word_quiz_max_count=int(os.getenv("WORD_QUIZ_MAX_COUNT") or 10),
+        word_quiz_option_count=int(os.getenv("WORD_QUIZ_OPTION_COUNT") or 4),
+        story_book_max_stories=int(os.getenv("STORY_BOOK_MAX_STORIES") or 30),
+        # --- end v1 library ---
     )
 
 
