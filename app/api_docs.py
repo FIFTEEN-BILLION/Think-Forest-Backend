@@ -797,6 +797,142 @@ EXAMPLES.update(
 # --- end v1 library ---
 
 
+# --- v1 activities ---
+_V1A_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1A_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1A_SCOPE = "아이 프로필 단위로 막혀 있습니다. 다른 프로필의 자료는 `404` 로만 답합니다."
+TAGS.update(
+    {
+        "v1-activities": (
+            "v1-7. 생각 모험 활동",
+            "숲·실험실·마음극장 활동 목록·상세와 활동 세션(시작·복원·자동 저장·단계 이동·완료·취소). "
+            "각 단계의 최소 입력·두 조건 관찰·선택 여부·보호자 확인은 서버가 다시 검사합니다. 완료하면 점수 없이 책장 기록이 하나 생깁니다.",
+        ),
+        "v1-topic-categories": (
+            "v1-8. 주제 카테고리",
+            "기본 카테고리(과학·수학·역사·생각놀이·생활)와 아이가 만든 카테고리. 기본 카테고리는 수정·삭제할 수 없습니다.",
+        ),
+        "v1-admin-topics": (
+            "v1-9. 요일별 주제 운영 (운영자)",
+            "요일·기간별 추천 편성. `ADMIN_KAKAO_IDS` 허용 목록의 계정만 쓸 수 있고, `/home` 추천 순서에만 영향을 줍니다.",
+        ),
+    }
+)
+OPERATIONS.update(
+    {
+        ("GET", "/api/v1/activities"): (
+            "활동 목록·검색",
+            f"`query`(제목·소개·태그), `track`(forest·lab·theater), `area`(영역 이름 일부), `cursor`·`limit`. {_V1A_SCOPE}",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/activities/{activity_id}"): (
+            "활동 소개·단계·시각 자료",
+            "소개(`intro`), 새 단서(`clue`), 단계 이름(`steps`), 대표 질문(`questions`), 시각 자료(`visuals`)를 돌려줍니다. "
+            "`minCharacters` 는 글쓰기 단계에서 공백을 뺀 최소 글자 수입니다.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/activity-sessions"): (
+            "활동 시작",
+            "`Idempotency-Key` 헤더를 넣으면 같은 키로 다시 불러도 처음 세션을 그대로 돌려줍니다. "
+            "마음극장 활동은 `keyword` 로 마음 키워드를 함께 보냅니다(안전하지 않으면 `422 UNSAFE_CONTENT`).",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/activity-sessions/{session_id}"): (
+            "진행 중 초안 복원",
+            f"단계·자동 저장 번호(`revision`)·초안(`draft`)·아직 못 채운 조건(`missing`)을 돌려줍니다. {_V1A_SCOPE}",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/activity-sessions/{session_id}"): (
+            "현재 단계 자동 저장",
+            "`clientRevision` 이 서버의 `revision` 과 같을 때만 저장합니다(다르면 `409 ACTIVITY_REVISION_CONFLICT`). "
+            "`event.type` 은 TEXT·HINT·TOPIC·KEYWORD·LAB_VALUE·OBSERVATION·APPROVE·SCENE·CHOICE·EMOTION·INQUIRY·RUN.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/activity-sessions/{session_id}/advance"): (
+            "다음 단계로 (서버가 조건 재검사)",
+            "최소 입력·두 조건 관찰·선택 여부·보호자 확인을 서버가 다시 봅니다. 못 채웠으면 "
+            "`409 ACTIVITY_STEP_NOT_READY` 와 함께 `details.missing`(조건 코드)·`details.conditions`(안내 문장)를 돌려줍니다.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/activity-sessions/{session_id}/complete"): (
+            "활동 완료 · 책장 기록 만들기",
+            "모든 단계를 마쳤을 때만 완료됩니다. 점수는 만들지 않고 `story_records` 한 줄을 만들어 `/stories` 에 보이게 합니다. "
+            "같은 세션을 다시 완료하면 처음 결과를 그대로 돌려줍니다.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/activity-sessions/{session_id}"): (
+            "진행 중 활동 취소",
+            "초안을 남기고 상태만 `CANCELLED` 로 바꿉니다. 이미 완료한 활동은 `409 SESSION_CLOSED`.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/topic-categories"): (
+            "주제 카테고리 목록",
+            "기본 카테고리(`kind: DEFAULT`, `editable: false`) 뒤에 내가 만든 카테고리(`kind: USER`)가 순서대로 붙습니다. "
+            "기본 5개 + 사용자 20개가 최대라 한 번에 모두 주고 `nextCursor` 는 항상 null 입니다.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/topic-categories"): (
+            "카테고리 추가",
+            "이름은 20자까지, 한 프로필에 20개까지입니다. 기본 카테고리·내 카테고리와 이름이 겹치면 `409 CATEGORY_EXISTS`, "
+            "민감한 이름은 `422 UNSAFE_CATEGORY`.",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/topic-categories/{category_id}"): (
+            "카테고리 이름·순서 수정",
+            "기본 카테고리는 `403 CATEGORY_NOT_EDITABLE`. 다른 프로필의 카테고리는 `404 CATEGORY_NOT_FOUND`.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/topic-categories/{category_id}"): (
+            "카테고리 삭제",
+            "내가 만든 카테고리만 지울 수 있습니다. 기본 카테고리는 `403 CATEGORY_NOT_EDITABLE`.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/admin/topic-schedules"): (
+            "요일·기간별 주제 편성 조회 (운영자)",
+            "`weekday`(0=월 … 6=일), `active`(오늘 적용 여부), `cursor`·`limit`. 허용 목록 밖 계정은 `403 FORBIDDEN`.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/admin/topic-schedules"): (
+            "추천 주제 편성 생성 (운영자)",
+            "`topicId` 는 주제 은행 주제만(`GET /topics` 의 `source: BANK`). `reason` 은 홈에 그대로 보이는 문장입니다. "
+            "`weekday` 를 비우면 기간 내 매일 적용합니다.",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/admin/topic-schedules/{schedule_id}"): (
+            "편성 기간·순서·대상 수정 (운영자)",
+            "`clearWeekday: true` 면 요일 조건을 없애 기간 내 매일로 바꿉니다.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/admin/topic-schedules/{schedule_id}"): (
+            "편성 취소 (운영자)",
+            "편성만 지웁니다. 아이가 그 주제를 고르는 것은 그대로 가능합니다.",
+            _V1A_TOKEN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("POST", "/api/v1/activity-sessions"): {"activityId": "kindness", "keyword": "배려"},
+        ("PATCH", "/api/v1/activity-sessions/{session_id}"): {
+            "clientRevision": 4,
+            "event": {"type": "OBSERVATION", "field": "LOW_LIGHT", "value": "빛이 낮아지니 그림자가 흐려졌어."},
+        },
+        ("POST", "/api/v1/topic-categories"): {"name": "공룡", "order": 0},
+        ("PATCH", "/api/v1/topic-categories/{category_id}"): {"name": "공룡 이야기", "order": 1},
+        ("POST", "/api/v1/admin/topic-schedules"): {
+            "topicId": "topic_ice_cup",
+            "startsOn": "2026-09-14",
+            "endsOn": "2026-09-20",
+            "weekday": 0,
+            "order": 0,
+            "reason": "이번 주 월요일은 물방울 이야기의 날이에요.",
+        },
+        ("PATCH", "/api/v1/admin/topic-schedules/{schedule_id}"): {"order": 1, "clearWeekday": True},
+    }
+)
+# --- end v1 activities ---
+
+
 def install(app: FastAPI) -> None:
     """생성된 스키마에 한국어 이름·설명·예시를 덧붙이는 openapi 함수로 바꾼다."""
 
