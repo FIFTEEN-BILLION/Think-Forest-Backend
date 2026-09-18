@@ -12,10 +12,11 @@ from .. import clock
 from ..auth import hash_token
 from ..db import get_session
 from ..models import Child
+from . import models_accounts, permissions
 from .errors import ApiError
 from .models import AccessToken, User
+from .models_accounts import ProfileMember
 from .models_conversation import ChildProfile
-from .permissions import ALL_PERMISSIONS
 
 
 @dataclass
@@ -50,18 +51,62 @@ class ProfileScope:
     child: Child
     profile: ChildProfile
     permissions: tuple[str, ...]
+    member: ProfileMember | None = None
 
     @property
     def profile_id(self) -> str:
         return self.profile.id
 
+    @property
+    def role(self) -> str:
+        return self.member.role if self.member else "OWNER"
 
-def _resolve_profile(db: Session, cu: CurrentUser, profile_id: str | None) -> ChildProfile | None:
-    """지금은 계정마다 아이 프로필 하나다. B1 트랙이 여러 프로필·보호자 연결로 넓힌다."""
-    own = db.scalar(select(ChildProfile).where(ChildProfile.child_id == cu.child.id))
-    if profile_id and (own is None or own.id != profile_id):
+    def has(self, permission: str) -> bool:
+        return permissions.has(self.permissions, permission)
+
+    def require(self, permission: str) -> None:
+        if not self.has(permission):
+            message = "보호자 권한이 없어요."
+            raise ApiError(403, "FORBIDDEN", message, {"profileId": self.profile.id, "required": permission})
+
+
+def _scope_from_member(db: Session, cu: CurrentUser, member: ProfileMember) -> ProfileScope | None:
+    profile = db.get(ChildProfile, member.profile_id)
+    child = db.get(Child, member.child_id)
+    if profile is None or child is None:
         return None
-    return own
+    return ProfileScope(
+        user=cu.user,
+        child=child,
+        profile=profile,
+        permissions=tuple(member.permissions or ()),
+        member=member,
+    )
+
+
+def _resolve_profile(db: Session, cu: CurrentUser, profile_id: str | None) -> ProfileScope | None:
+    """계정이 볼 수 있는 프로필(내 프로필 또는 보호자 연결로 붙은 프로필)을 그 연결의 권한과 함께 찾는다.
+
+    profileId 를 주지 않으면 이 계정의 기본 프로필을 쓴다(기존 한 계정 = 한 아이 동작 유지).
+    """
+    member = (
+        models_accounts.member_for(db, cu.user, profile_id)
+        if profile_id
+        else models_accounts.default_member(db, cu.user)
+    )
+    return _scope_from_member(db, cu, member) if member else None
+
+
+def resolve_scope(
+    db: Session, cu: CurrentUser, profile_id: str | None = None, *, permission: str | None = None
+) -> ProfileScope:
+    """경로 파라미터로 받은 profileId 용. 남의 프로필은 존재 자체를 알리지 않는다(404)."""
+    scope = _resolve_profile(db, cu, profile_id)
+    if scope is None:
+        raise ApiError(404, "PROFILE_NOT_FOUND", "아이 프로필을 찾을 수 없어요.", {"profileId": profile_id})
+    if permission:
+        scope.require(permission)
+    return scope
 
 
 def require_profile(
@@ -69,10 +114,7 @@ def require_profile(
     cu: CurrentUser = Depends(require_user),
     db: Session = Depends(get_session),
 ) -> ProfileScope:
-    profile = _resolve_profile(db, cu, profile_id)
-    if profile is None:
-        raise ApiError(404, "PROFILE_NOT_FOUND", "아이 프로필을 찾을 수 없어요.", {"profileId": profile_id})
-    return ProfileScope(user=cu.user, child=cu.child, profile=profile, permissions=ALL_PERMISSIONS)
+    return resolve_scope(db, cu, profile_id)
 
 
 def optional_profile(
@@ -80,5 +122,16 @@ def optional_profile(
     cu: CurrentUser = Depends(require_user),
     db: Session = Depends(get_session),
 ) -> ProfileScope | None:
-    profile = _resolve_profile(db, cu, profile_id)
-    return ProfileScope(user=cu.user, child=cu.child, profile=profile, permissions=ALL_PERMISSIONS) if profile else None
+    return _resolve_profile(db, cu, profile_id)
+
+
+def require_consents(db: Session, scope: ProfileScope, documents: tuple[str, ...]) -> None:
+    """명세 26절 — 동의가 꼭 있어야 하는 요청. 대화 API 는 여기 걸지 않는다(동의가 없으면 규칙 기반으로 계속한다)."""
+    missing = models_accounts.missing_consents(db, scope.profile_id, documents)
+    if missing:
+        raise ApiError(
+            403,
+            "CONSENT_REQUIRED",
+            "보호자 동의가 필요해요.",
+            {"profileId": scope.profile_id, "documentIds": missing},
+        )
