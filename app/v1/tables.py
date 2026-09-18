@@ -2,4 +2,13 @@
 
 from __future__ import annotations
 
-from . import models, models_auth, models_conversation  # noqa: F401
+from . import (  # noqa: F401
+    models,
+    models_accounts,
+    models_activity,
+    models_auth,
+    models_conversation,
+    models_library,
+    models_ops,
+    models_social,
+)
