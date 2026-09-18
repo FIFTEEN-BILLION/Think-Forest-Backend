@@ -619,7 +619,7 @@ def test_ops_endpoints_need_a_token(client):
 
 
 def test_voice_consent_from_consent_api_opens_speech(client, frozen):
-    """예전 권한이 없어도 보호자가 음성 동의를 남기면 음성 API 가 열린다(명세 26절)."""
+    """로컬 기본값은 허용하고, 보호자 동의 API를 사용한 계정도 음성 API를 쓸 수 있다."""
     from app.v1 import models_accounts
 
     session = next(db.get_session())
@@ -627,9 +627,8 @@ def test_voice_consent_from_consent_api_opens_speech(client, frozen):
     headers = auth(issue_access_token(session, account))
     session.commit()
 
-    blocked = client.post("/api/v1/speech/stream-tickets", json={"locale": "ko-KR"}, headers=headers)
-    assert blocked.status_code == 403 and blocked.json()["error"]["code"] == "CONSENT_REQUIRED"
-    assert blocked.json()["error"]["details"]["documentIds"] == ["voice_retention"]
+    default_opened = client.post("/api/v1/speech/stream-tickets", json={"locale": "ko-KR"}, headers=headers)
+    assert default_opened.status_code == 201 and default_opened.json()["ticket"]
 
     created = client.post("/api/v1/profiles", json={"nickname": "달"}, headers=headers)
     assert created.status_code == 201
