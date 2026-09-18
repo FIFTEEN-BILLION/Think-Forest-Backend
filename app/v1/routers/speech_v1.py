@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFi
 from fastapi.concurrency import run_in_threadpool
 from pydantic import Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ... import clock
 from ...auth import permission_enabled
@@ -29,7 +29,7 @@ from ...safety.blocklist import find_blocked
 from ...schemas.common import CamelModel
 from ...services import speech as speech_service
 from ...services import tts, usage
-from .. import cursor, speech_engine, speech_tickets
+from .. import cursor, models_accounts, speech_engine, speech_tickets
 from ..deps import CurrentUser, require_user
 from ..errors import ApiError
 from ..models import User
@@ -83,6 +83,19 @@ class SynthesisRequest(CamelModel):
 
 
 # ---------------------------------------------------------------- 공통 확인
+
+
+def _has_voice_consent(child: Child) -> bool:
+    """보호자가 음성 보관 동의(`voice_retention`)를 남겼는지. 동의 API(26절)가 권한의 근거다."""
+    db = object_session(child)
+    if db is None:
+        return False
+    with db.no_autoflush:
+        profile = db.scalar(select(ChildProfile).where(ChildProfile.child_id == child.id))
+        if profile is None:
+            return False
+        consent = models_accounts.active_consent(db, profile.id, "voice_retention")
+    return consent is not None and consent.actor_role == "GUARDIAN"
 
 
 def _require_voice(child: Child) -> None:
