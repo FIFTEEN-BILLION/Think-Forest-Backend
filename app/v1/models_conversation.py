@@ -150,3 +150,10 @@ class IdempotencyRecord(Base):
     status_code: Mapped[int] = mapped_column(Integer)
     body: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class ConversationOwner(Base):
+    """대화가 속한 아이. 기존 대화 테이블 변경 없이 여러 아이의 기록을 분리한다."""
+    __tablename__ = "conversation_owners"
+    session_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), primary_key=True)
+    child_id: Mapped[str] = mapped_column(ForeignKey("children.id"), index=True)

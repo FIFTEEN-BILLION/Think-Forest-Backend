@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from ..auth import PERMISSION_KEYS, guardian_child, new_token, require_child, require_guardian
+from ..auth import PERMISSION_KEYS, guardian_child, new_token, permission_enabled, require_child, require_guardian
 from ..db import get_session
 from ..models import Child, Circle, CircleMember, DeviceToken, Family, SafetyEvent
 from ..schemas.family import (
@@ -34,7 +34,7 @@ DEV_NOTICE = "개발용 토큰이에요. 실제 보호자 본인 확인이나 �
 
 
 def child_out(child: Child) -> ChildOut:
-    perms = {key: bool((child.permissions or {}).get(key)) for key in PERMISSION_KEYS}
+    perms = {key: permission_enabled(child, key) for key in PERMISSION_KEYS}
     return ChildOut(
         id=child.id,
         nickname=child.nickname,
@@ -65,7 +65,7 @@ def create_child(
         family_id=family.id,
         nickname=clean_nickname(req.nickname) or "",
         is_tester=req.tester,
-        permissions=dict.fromkeys(PERMISSION_KEYS, False),
+        permissions={key: key == "voice" for key in PERMISSION_KEYS},
         onboarding={},
         likes=[],
         want_to_learn=[],

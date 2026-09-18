@@ -8,6 +8,7 @@ from conftest import grant
 
 
 def test_synthesize_needs_voice_permission(client, child):
+    grant(client, child, voice=False)
     r = client.post("/voice/synthesize", json={"text": "안녕"}, headers=child["headers"])
     assert r.status_code == 403 and r.json()["detail"] == "permission_required:voice"
 

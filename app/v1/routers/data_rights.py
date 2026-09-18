@@ -150,14 +150,19 @@ def data_overview(cu: CurrentUser = Depends(require_user), db: Session = Depends
     ops_data.run_due(db)
     pending = db.scalar(
         select(DeletionRequest)
-        .where(DeletionRequest.user_id == cu.id, DeletionRequest.status == "QUEUED")
+        .where(
+            DeletionRequest.user_id == cu.id,
+            DeletionRequest.status == "QUEUED",
+            DeletionRequest.kind == "DATA",
+            ((DeletionRequest.kind == "ACCOUNT") | (DeletionRequest.child_id == cu.child.id)),
+        )
         .order_by(DeletionRequest.created_at.desc())
     )
     return DataOverview(
         profile_id=_own_profile_id(db, cu, None),
         counts=ops_data.counts(db, cu.user, cu.child),
         retention=ops_data.retention(),
-        hidden_scopes=sorted(ops_data.hidden_scopes(db, cu.id)),
+        hidden_scopes=sorted(ops_data.hidden_scopes(db, cu.id, cu.child.id)),
         pending_deletion_request_id=pending.id if pending else None,
         generated_at=cursor.iso(clock.now()) or "",
     )
@@ -309,9 +314,7 @@ def _own_request(db: Session, cu: CurrentUser, request_id: str, kind: str) -> De
 
 def _cancel(db: Session, cu: CurrentUser, row: DeletionRequest) -> DeletionRequest:
     if row.status != "QUEUED" or row.effective_at <= clock.now():
-        raise ApiError(
-            409, "DELETION_NOT_CANCELLABLE", "유예기간이 지나 취소할 수 없어요.", {"status": row.status}
-        )
+        raise ApiError(409, "DELETION_NOT_CANCELLABLE", "유예기간이 지나 취소할 수 없어요.", {"status": row.status})
     row.status = "CANCELLED"
     row.cancelled_at = clock.now()
     row.hidden_at = None  # 다시 보이게 한다

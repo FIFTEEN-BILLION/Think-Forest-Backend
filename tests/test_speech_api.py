@@ -9,6 +9,7 @@ from conftest import grant
 
 
 def test_speech_needs_voice_permission_and_zdr(client, child):
+    grant(client, child, voice=False)
     files = {"file": ("speech.webm", b"voice", "audio/webm")}
     assert client.post("/speech/transcriptions", files=files, headers=child["headers"]).json()["detail"] == (
         "permission_required:voice"

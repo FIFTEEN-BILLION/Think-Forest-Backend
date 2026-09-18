@@ -60,12 +60,10 @@ def use_engine(monkeypatch, partials: list[str], final_text: str) -> None:
 
 @pytest.fixture
 def user(client, frozen):
-    """v1 계정 + access token + 보호자 음성 허락."""
+    """v1 계정 + access token. 음성 권한은 미설정(기본 허용)."""
     session = next(db.get_session())
     account = create_account(session, is_tester=True, nickname="별")
     raw = issue_access_token(session, account)
-    child = session.get(Child, account.child_id)
-    child.permissions = {"voice": True}
     session.commit()
     return {"id": account.id, "childId": account.child_id, "headers": auth(raw), "token": raw}
 
@@ -116,9 +114,9 @@ def test_stream_ticket_is_single_use_and_expires(client, user, frozen, monkeypat
         assert ws.receive_json()["code"] == "TICKET_INVALID"
 
 
-def test_stream_ticket_needs_voice_consent(client, user):
+def test_stream_ticket_respects_voice_disabled(client, user):
     session = next(db.get_session())
-    session.get(Child, user["childId"]).permissions = {}
+    session.get(Child, user["childId"]).permissions = {"voice": False}
     session.commit()
     res = client.post("/api/v1/speech/stream-tickets", json={}, headers=user["headers"])
     assert res.status_code == 403
@@ -133,6 +131,45 @@ def test_stream_ticket_rejects_other_audio_format(client, user):
         headers=user["headers"],
     )
     assert res.status_code == 400 and res.json()["error"]["code"] == "INVALID_INPUT"
+
+
+def test_voice_defaults_allow_all_speech_endpoints(client, user, monkeypatch):
+    use_engine(monkeypatch, [], "안녕")
+    monkeypatch.setattr(speech_service, "transcribe", lambda *args: "안녕")
+    monkeypatch.setattr(tts_service, "synthesize", lambda text: (b"mp3", "audio/mpeg"))
+    with next(db.get_session()) as session:
+        assert "voice" not in session.get(Child, user["childId"]).permissions
+    ticket = issue_ticket(client, user)
+    with client.websocket_connect(f"/api/v1/speech/stream?ticket={ticket['ticket']}") as ws:
+        ws.send_json({"type": "START"})
+        ws.send_bytes(ONE_SECOND)
+        ws.send_json({"type": "STOP"})
+        assert ws.receive_json()["type"] == "FINAL_TRANSCRIPT"
+    audio = {"file": ("a.wav", speech_engine.pcm_to_wav(ONE_SECOND), "audio/wav")}
+    result = client.post("/api/v1/speech/transcriptions", files=audio, headers=user["headers"])
+    assert result.status_code == 200 and result.json()["text"] == "안녕"
+    result = client.post("/api/v1/speech/synthesis", json={"text": "안녕"}, headers=user["headers"])
+    assert result.status_code == 200
+
+
+def test_disabled_voice_blocks_audio_and_previously_issued_ticket(client, user, monkeypatch):
+    def unexpected_provider(*args):
+        pytest.fail("꺼진 음성 설정으로 외부 제공자를 호출하면 안 된다")
+
+    monkeypatch.setattr(speech_engine, "make_engine", unexpected_provider)
+    monkeypatch.setattr(speech_service, "transcribe", unexpected_provider)
+    ticket = issue_ticket(client, user)
+    with next(db.get_session()) as session:
+        session.get(Child, user["childId"]).permissions = {"voice": False}
+        session.commit()
+    with client.websocket_connect(f"/api/v1/speech/stream?ticket={ticket['ticket']}") as ws:
+        assert ws.receive_json()["code"] == "CONSENT_REQUIRED"
+    result = client.post(
+        "/api/v1/speech/transcriptions",
+        files={"file": ("a.wav", ONE_SECOND, "audio/wav")},
+        headers=user["headers"],
+    )
+    assert result.status_code == 403
 
 
 # ---------------------------------------------------------------- 20. WebSocket
@@ -266,12 +303,12 @@ def test_transcriptions_report_no_speech(client, user, monkeypatch):
 # ---------------------------------------------------------------- 20. 읽어주기
 
 
-def test_synthesis_needs_consent_and_blocks_unsafe_text(client, user, monkeypatch):
+def test_synthesis_respects_voice_disabled_and_blocks_unsafe_text(client, user, monkeypatch):
     called = []
     monkeypatch.setattr(tts_service, "synthesize", lambda text: (called.append(text), (b"mp3", "audio/mpeg"))[1])
 
     session = next(db.get_session())
-    session.get(Child, user["childId"]).permissions = {}
+    session.get(Child, user["childId"]).permissions = {"voice": False}
     session.commit()
     denied = client.post("/api/v1/speech/synthesis", json={"text": "안녕"}, headers=user["headers"])
     assert denied.status_code == 403 and denied.json()["error"]["code"] == "CONSENT_REQUIRED"

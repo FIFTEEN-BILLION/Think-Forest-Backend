@@ -64,11 +64,11 @@ TAGS: dict[str, tuple[str, str]] = {
     "categories": ("4. 내가 만든 카테고리 (아이)", "아이가 '!' 버튼으로 관심 카테고리를 만들고 대화 주제를 제안받습니다."),
     "speech": (
         "5. 음성 입력 (아이)",
-        "말하는 동안 글자를 바로 보여 주는 실시간 인식 키, 녹음 파일 인식. 보호자의 음성 권한이 필요합니다.",
+        "말하는 동안 글자를 바로 보여 주는 실시간 인식 키, 녹음 파일 인식. 음성은 기본 허용이며 보호자 설정에서 끌 수 있습니다.",
     ),
     "voice": (
         "5. 음성 출력 (아이)",
-        "문장을 Typecast 음성으로 읽어 줍니다. 보호자의 음성 권한이 필요합니다.",
+        "문장을 Typecast 음성으로 읽어 줍니다. 음성은 기본 허용이며 보호자 설정에서 끌 수 있습니다.",
     ),
     "library": (
         "6. 단어·이야기책 (아이·보호자)",
@@ -1127,7 +1127,7 @@ TAGS.update(
         "v1-profiles": (
             "v1-7. 아이 프로필",
             "로그인 계정(보호자·가족)이 아이 프로필을 여러 개 갖습니다. 프로필마다 별명·학년대·관심사와 "
-            "화면·보관 설정(ttsEnabled·guardianPreviewEnabled·theme·retentionDays)이 따로 있습니다. "
+            "화면·보관 설정(voiceEnabled·ttsEnabled·guardianPreviewEnabled·theme·retentionDays)이 따로 있습니다. "
             "수정은 `If-Match` 로 버전을 확인합니다.",
         ),
         "v1-guardian-links": (
@@ -1168,7 +1168,7 @@ OPERATIONS.update(
         ),
         ("GET", "/api/v1/profiles/{profile_id}/settings"): (
             "프로필 설정 보기",
-            "`ttsEnabled`(읽어 주기), `guardianPreviewEnabled`(보호자 먼저보기), `theme`, `retentionDays`(보관 기간).",
+            "`voiceEnabled`(음성 사용, 기본 허용), `ttsEnabled`(읽어 주기), `guardianPreviewEnabled`(보호자 먼저보기), `theme`, `retentionDays`(보관 기간).",
             _V1A_TOKEN,
         ),
         ("PATCH", "/api/v1/profiles/{profile_id}/settings"): (
@@ -1263,7 +1263,7 @@ TAGS.update(
         "v1-speech": (
             "v1-7. 음성 입력·읽어주기",
             "말하는 동안 자막을 보여 주는 실시간 인식(WebSocket), 녹음 파일 재시도, 티키 메시지 읽어주기. "
-            "음성 조각은 메모리에서만 다루고 저장하지 않습니다. 보호자의 음성 동의가 필요합니다.",
+            "음성 조각은 메모리에서만 다루고 저장하지 않습니다. 음성 사용은 기본 허용이며, 보호자 설정 voiceEnabled=false이면 차단합니다.",
         ),
         "v1-notifications": (
             "v1-8. 알림·기기",
@@ -1418,6 +1418,15 @@ EXAMPLES.update(
     }
 )
 # --- /v1 ops ---
+
+
+OPERATIONS.update({
+    ("GET", "/api/v1/service-info"): ("서비스 연결 상태", "키를 공개하지 않고 AI·음성 사용 가능 여부를 알려 줍니다.", "JJCP access token"),
+    ("GET", "/api/v1/activity-sessions"): ("저장한 모험 목록", "현재 아이 프로필의 진행 중·완료·중단 활동을 찾습니다.", "JJCP access token"),
+    ("GET", "/api/v1/word-quizzes/{quiz_id}"): ("단어 퀴즈 복원", "저장된 문제와 답변 여부를 다시 불러옵니다.", "JJCP access token"),
+    ("POST", "/api/v1/activity-sessions/{session_id}/path/teach"): ("티키에게 길 알려 주기", "말과 프로그램을 소유한 활동에 저장합니다. clientRevision으로 동시 수정을 검사합니다.", "JJCP access token"),
+    ("POST", "/api/v1/activity-sessions/{session_id}/path/run"): ("티키 배달 실행", "서버가 저장된 프로그램을 실행하고 결과를 기록합니다.", "JJCP access token"),
+})
 
 
 def install(app: FastAPI) -> None:

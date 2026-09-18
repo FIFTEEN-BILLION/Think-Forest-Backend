@@ -15,7 +15,7 @@ from ...db import get_session
 from ...safety import pii
 from .. import activity_catalog as catalog
 from .. import activity_rules as rules
-from .. import cursor, idempotency
+from .. import conversation_scope, cursor, idempotency
 from ..activity_schemas import (
     ActivityCompleteResponse,
     ActivityDetail,
@@ -304,6 +304,8 @@ def complete_activity_session(
         updated_at=now,
     )
     db.add(anchor)
+    db.flush()
+    conversation_scope.bind(db, anchor.id, scope.child.id)
     story = StoryRecord(
         user_id=session.user_id,
         session_id=anchor.id,
@@ -372,3 +374,33 @@ def open_sessions(db: Session, profile_id: str) -> list[ActivitySession]:
             .order_by(ActivitySession.updated_at.desc())
         )
     )
+
+
+@router.get("/activity-sessions")
+def list_sessions(
+    status: str = Query(default="ACTIVE"),
+    cursor_raw: str | None = Query(default=None, alias="cursor"),
+    limit: int | None = Query(default=None),
+    scope: ProfileScope = Depends(require_profile),
+    db: Session = Depends(get_session),
+):
+    """프로필별 저장한 활동 목록. 홈·활동 선택에서 이어하기에 쓴다."""
+    if status not in ("ACTIVE", "COMPLETED", "CANCELLED"):
+        raise ApiError(400, "INVALID_INPUT", "활동 상태를 확인해 주세요.")
+    size, offset = cursor.clamp_limit(limit), cursor.decode_offset(cursor_raw)
+    rows = list(
+        db.scalars(
+            select(ActivitySession)
+            .where(
+                ActivitySession.profile_id == scope.profile_id,
+                ActivitySession.status == status,
+            )
+            .order_by(ActivitySession.updated_at.desc(), ActivitySession.id.desc())
+            .offset(offset)
+            .limit(size + 1)
+        )
+    )
+    return {
+        "items": [_session_out(row).model_dump(mode="json", by_alias=True) for row in rows[:size]],
+        "nextCursor": cursor.encode_offset(offset + size) if len(rows) > size else None,
+    }

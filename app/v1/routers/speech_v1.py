@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ... import clock
+from ...auth import permission_enabled
 from ...config import get_settings
 from ...db import get_session
 from ...models import Child
@@ -85,13 +86,13 @@ class SynthesisRequest(CamelModel):
 
 
 def _require_voice(child: Child) -> None:
-    """보호자의 음성 동의(권한)가 있어야 한다. 명세 26절: 없으면 403 CONSENT_REQUIRED."""
-    if not (child.permissions or {}).get("voice"):
+    """미설정 시 허용하며, 보호자가 설정에서 끈 경우에만 차단한다."""
+    if not permission_enabled(child, "voice"):
         raise ApiError(
             403,
             "CONSENT_REQUIRED",
-            "보호자가 음성 사용을 허락해야 들을 수 있어요.",
-            {"permission": "voice", "documentIds": ["voice_input"]},
+            "보호자 설정에서 음성 사용이 꺼져 있어요.",
+            {"permission": "voice", "setting": "voiceEnabled"},
         )
 
 
@@ -176,10 +177,18 @@ async def stream(
         return
 
     user = db.get(User, row.user_id)
-    child = db.get(Child, user.child_id) if user else None
+    profile = db.get(ChildProfile, row.profile_id) if row.profile_id else None
+    child_id = profile.child_id if profile else user.child_id if user and not row.profile_id else None
+    child = db.get(Child, child_id) if child_id else None
     if child is None:
         await _send_error(websocket, "TICKET_INVALID", False, "연결이 만료됐어요. 마이크를 다시 눌러 주세요.")
         await websocket.close(code=4401)
+        return
+    try:
+        _require_voice(child)
+    except ApiError as exc:
+        await _send_error(websocket, exc.code, False, exc.message)
+        await _close(db, websocket, row)
         return
     try:
         engine = speech_engine.make_engine(child)

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ... import clock
 from ...db import get_session
-from .. import activity_home, activity_schedules, models_accounts, topic_catalog
+from .. import activity_home, activity_schedules, conversation_scope, models_accounts, topic_catalog
 from ..cursor import iso
 from ..deps import CurrentUser, require_user
 from ..models_conversation import ChildProfile, ConversationMessage, ConversationSession, StoryRecord
@@ -97,6 +97,7 @@ def home(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sess
         select(ConversationSession)
         .where(
             ConversationSession.user_id == cu.id,
+            conversation_scope.condition(ConversationSession.id, cu.child.id),
             ConversationSession.kind == "STORY",
             ConversationSession.status.in_(("ACTIVE", "READY_TO_FINISH")),
         )
@@ -108,13 +109,18 @@ def home(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sess
         .join(ConversationSession, ConversationSession.id == ConversationMessage.session_id)
         .where(
             ConversationSession.user_id == cu.id,
+            conversation_scope.condition(ConversationSession.id, cu.child.id),
             ConversationMessage.role == "USER",
             ConversationMessage.created_at >= since,
         )
     )
     days = {clock.kst(stamp).date() for stamp in stamps}
     completed = db.scalar(
-        select(func.count(StoryRecord.id)).where(StoryRecord.user_id == cu.id, StoryRecord.created_at >= since)
+        select(func.count(StoryRecord.id)).where(
+            StoryRecord.user_id == cu.id,
+            StoryRecord.created_at >= since,
+            conversation_scope.condition(StoryRecord.session_id, cu.child.id),
+        )
     )
     return HomeResponse(
         profile=HomeProfile(
@@ -131,7 +137,21 @@ def home(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sess
         if latest
         else None,
         # 단어 보관함·친구 이야기 테이블은 다른 트랙이 만든다. 아직 없으면 빈 목록으로 내려간다.
-        recent_words=activity_home.recent_words(db, cu.id),
-        community_stories=activity_home.community_stories(db, cu.id),
+        recent_words=activity_home.recent_words(db, cu.id, profile_id=profile.id if profile else None),
+        community_stories=activity_home.community_stories(db, cu),
         weekly_activity=WeeklyActivity(conversation_days=len(days), completed_stories=completed or 0),
     )
+
+
+@router.get("/service-info")
+def service_info(cu: CurrentUser = Depends(require_user)):
+    from ...config import get_settings
+
+    settings = get_settings()
+    return {
+        "service": "생각친구 티키",
+        "storage": "서버 데이터베이스",
+        "aiAvailable": settings.openai_enabled,
+        "speechAvailable": settings.speech_enabled and bool(settings.openai_api_key),
+        "streamingAvailable": settings.speech_enabled and settings.websocket_enabled and bool(settings.openai_api_key),
+    }

@@ -24,7 +24,7 @@ class ChildCreateRequest(CamelModel):
 
 
 class Permissions(CamelModel):
-    voice: bool = False
+    voice: bool = True
     browse_shared: bool = False
     publish_request: bool = False
 
