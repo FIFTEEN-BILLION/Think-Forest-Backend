@@ -13,7 +13,7 @@ from ..models import SafetyEvent
 from ..safety import pii
 from ..safety import topics as sensitive
 from ..talks.planner import clip
-from . import ai_gate
+from . import ai_gate, conversation_scope
 from .cursor import iso
 from .deps import CurrentUser
 from .errors import ApiError
@@ -61,6 +61,8 @@ def combine_end_intent(rule: str, ai: str | None) -> str:
 def own_session(db: Session, cu: CurrentUser, session_id: str, kind: str) -> ConversationSession:
     session = db.get(ConversationSession, session_id)
     if session is None or session.user_id != cu.id or session.kind != kind:
+        raise ApiError(404, "SESSION_NOT_FOUND", "대화를 찾을 수 없어요.")
+    if not conversation_scope.belongs(db, session.id, cu.child.id):
         raise ApiError(404, "SESSION_NOT_FOUND", "대화를 찾을 수 없어요.")
     return session
 

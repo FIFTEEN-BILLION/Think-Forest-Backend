@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from ... import clock
 from ...db import get_session
-from .. import cursor, library_books
-from ..deps import CurrentUser, require_user
+from .. import conversation_scope, cursor, library_books
+from ..deps import CurrentUser, require_user, resolve_scope
 from ..library_common import check_version, child_text, own_story, story_summary
 from ..library_schemas import (
     SourceConversation,
@@ -39,7 +39,12 @@ def _kst_midnight_utc(day: date) -> datetime:
 
 
 def _own_story(db: Session, cu: CurrentUser, story_id: str) -> StoryRecord:
-    return own_story(db, cu.id, story_id)
+    story = own_story(db, cu.id, story_id)
+    if not conversation_scope.belongs(db, story.session_id, cu.child.id):
+        from ..errors import ApiError
+
+        raise ApiError(404, "STORY_NOT_FOUND", "이야기를 찾을 수 없어요.")
+    return story
 
 
 @router.get("", response_model=StoryList)
@@ -55,7 +60,9 @@ def list_stories(
     db: Session = Depends(get_session),
 ):
     size = cursor.clamp_limit(limit)
-    stmt = select(StoryRecord).where(StoryRecord.user_id == cu.id)
+    stmt = select(StoryRecord).where(
+        StoryRecord.user_id == cu.id, conversation_scope.condition(StoryRecord.session_id, cu.child.id)
+    )
     if query and query.strip():
         q = query.strip()
         stmt = stmt.where(
@@ -87,9 +94,7 @@ def list_stories(
 def _words_used(db: Session, cu: CurrentUser, story: StoryRecord) -> list[WordUsed]:
     """이 이야기에서 담은 낱말 — 원본 대화에서 담았거나, 이야기 글에 실제로 나오는 낱말."""
     text = f"{story.title} {story.summary} {story.body}"
-    rows = db.scalars(
-        select(WordbookEntry).where(WordbookEntry.user_id == cu.id).order_by(WordbookEntry.created_at)
-    )
+    rows = db.scalars(select(WordbookEntry).where(WordbookEntry.user_id == cu.id).order_by(WordbookEntry.created_at))
     return [
         WordUsed(id=e.id, word=e.word, meaning=e.meaning, status=e.status)  # type: ignore[arg-type]
         for e in rows
@@ -99,7 +104,7 @@ def _words_used(db: Session, cu: CurrentUser, story: StoryRecord) -> list[WordUs
 
 def _source_conversation(db: Session, story: StoryRecord) -> SourceConversation | None:
     session = db.get(ConversationSession, story.session_id)
-    if session is None:
+    if session is None or session.kind != "STORY":
         return None
     count = db.scalar(select(func.count(ConversationMessage.id)).where(ConversationMessage.session_id == session.id))
     return SourceConversation(
@@ -113,8 +118,21 @@ def _source_conversation(db: Session, story: StoryRecord) -> SourceConversation 
 
 
 @router.get("/{story_id}", response_model=StoryDetail)
-def get_story(story_id: str, cu: CurrentUser = Depends(require_user), db: Session = Depends(get_session)):
-    story = _own_story(db, cu, story_id)
+def get_story(
+    story_id: str,
+    profile_id: str | None = Query(default=None, alias="profileId"),
+    cu: CurrentUser = Depends(require_user),
+    db: Session = Depends(get_session),
+):
+    if profile_id:
+        scope = resolve_scope(db, cu, profile_id, permission="VIEW_STORIES")
+        story = own_story(db, scope.profile.user_id, story_id)
+        if not conversation_scope.belongs(db, story.session_id, scope.child.id):
+            from ..errors import ApiError
+
+            raise ApiError(404, "STORY_NOT_FOUND", "이야기를 찾을 수 없어요.")
+    else:
+        story = _own_story(db, cu, story_id)
     return StoryDetail(
         story=story_out(story),
         words_used=_words_used(db, cu, story),

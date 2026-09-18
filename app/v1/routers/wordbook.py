@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from ... import clock
 from ...db import get_session
-from .. import cursor, idempotency, library_words
+from .. import conversation_scope, cursor, idempotency, library_words
 from ..deps import ProfileScope, require_profile
 from ..errors import ApiError
 from ..library_common import child_text, current_user
@@ -101,7 +101,12 @@ def add_entry(
     word = child_text(db, current_user(scope), req.word, 30)
     message = db.get(ConversationMessage, req.message_id)
     session = db.get(ConversationSession, message.session_id) if message else None
-    if message is None or session is None or session.user_id != scope.user.id:
+    if (
+        message is None
+        or session is None
+        or session.user_id != scope.profile.user_id
+        or not conversation_scope.belongs(db, session.id, scope.child.id)
+    ):
         raise ApiError(404, "MESSAGE_NOT_FOUND", "그 대화를 찾을 수 없어요.")
     if req.conversation_id and req.conversation_id != session.id:
         raise ApiError(404, "MESSAGE_NOT_FOUND", "그 대화를 찾을 수 없어요.")
@@ -140,9 +145,7 @@ def add_entry(
 
 
 @router.get("/wordbook/entries/{entry_id}", response_model=WordbookEntryResponse)
-def get_entry(
-    entry_id: str, scope: ProfileScope = Depends(require_profile), db: Session = Depends(get_session)
-):
+def get_entry(entry_id: str, scope: ProfileScope = Depends(require_profile), db: Session = Depends(get_session)):
     return WordbookEntryResponse(entry=library_words.entry_out(_own_entry(db, scope, entry_id)))
 
 
@@ -165,9 +168,7 @@ def edit_entry(
 
 
 @router.delete("/wordbook/entries/{entry_id}", status_code=204)
-def delete_entry(
-    entry_id: str, scope: ProfileScope = Depends(require_profile), db: Session = Depends(get_session)
-):
+def delete_entry(entry_id: str, scope: ProfileScope = Depends(require_profile), db: Session = Depends(get_session)):
     entry = _own_entry(db, scope, entry_id)
     for question in db.scalars(select(WordQuizQuestion).where(WordQuizQuestion.entry_id == entry.id)):
         db.delete(question)
@@ -209,9 +210,7 @@ def answer_quiz(
     progress = library_words.quiz_out(db, quiz)
     db.commit()
     return QuizAnswerResponse(
-        result=QuizAnswerResult(
-            question_id=question.id, correct=correct, correct_option_id=question.answer_option_id
-        ),
+        result=QuizAnswerResult(question_id=question.id, correct=correct, correct_option_id=question.answer_option_id),
         entry=library_words.entry_out(entry),
         quiz=QuizProgress(
             id=quiz.id,
@@ -220,3 +219,9 @@ def answer_quiz(
             answered_count=progress.answered_count,
         ),
     )
+
+
+@router.get("/word-quizzes/{quiz_id}", response_model=WordQuizOut)
+def get_quiz(quiz_id: str, scope: ProfileScope = Depends(require_profile), db: Session = Depends(get_session)):
+    """새로고침 뒤 저장된 퀴즈와 답한 문제를 복원한다."""
+    return library_words.quiz_out(db, _own_quiz(db, scope, quiz_id))

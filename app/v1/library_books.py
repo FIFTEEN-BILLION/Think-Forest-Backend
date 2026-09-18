@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..config import get_settings
 from ..services import usage
-from . import ai_gate
+from . import ai_gate, conversation_scope
 from .cursor import iso
 from .deps import ProfileScope
 from .errors import ApiError
@@ -51,6 +51,8 @@ def renumber(rows: list[StoryBookItem]) -> None:
 
 def add_story(db: Session, scope: ProfileScope, book: StoryBook, story_id: str, position: int | None) -> None:
     story = own_story(db, scope.user.id, story_id)
+    if not conversation_scope.belongs(db, story.session_id, scope.child.id):
+        raise ApiError(404, "STORY_NOT_FOUND", "이야기를 찾을 수 없어요.")
     rows = items(db, book.id)
     if any(row.story_id == story.id for row in rows):
         raise ApiError(409, "STORY_ALREADY_IN_BOOK", "이미 이 책에 담긴 이야기예요.", {"storyId": story.id})

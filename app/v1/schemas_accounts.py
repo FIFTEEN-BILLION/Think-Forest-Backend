@@ -73,6 +73,7 @@ class ProfileUpdateRequest(CamelModel):
 
 class SettingsOut(CamelModel):
     profile_id: str
+    voice_enabled: bool = Field(description="마이크·읽어주기 사용 허용. 미설정 시 true")
     tts_enabled: bool
     guardian_preview_enabled: bool
     theme: Theme
@@ -99,6 +100,7 @@ class SettingsResponse(CamelModel):
 
 
 class SettingsUpdateRequest(CamelModel):
+    voice_enabled: bool | None = Field(default=None, description="보호자 음성 사용 설정. 생략하면 기존 값 유지")
     tts_enabled: bool | None = None
     guardian_preview_enabled: bool | None = None
     theme: Theme | None = None

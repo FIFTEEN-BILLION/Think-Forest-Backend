@@ -16,7 +16,7 @@ def test_guardian_and_child_tokens_are_scoped(client, family, child):
     assert client.get("/me", headers=family["headers"]).status_code == 401
     me = client.get("/me", headers=child["headers"]).json()
     assert me["nickname"] == "하늘"
-    assert me["permissions"] == {"voice": False, "browseShared": False, "publishRequest": False}
+    assert me["permissions"] == {"voice": True, "browseShared": False, "publishRequest": False}
     grant(client, child, voice=True)
     assert client.get("/me", headers=child["headers"]).json()["permissions"]["voice"] is True
     client.delete(f"/guardian/children/{child['id']}/devices", headers=family["headers"])

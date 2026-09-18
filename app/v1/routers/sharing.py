@@ -10,9 +10,10 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from ...db import get_session
-from .. import cursor, idempotency, social_sharing
+from .. import conversation_scope, cursor, idempotency, social_sharing
 from ..deps import CurrentUser, ProfileScope, require_profile, require_user
 from ..errors import ApiError
+from ..models_conversation import StoryRecord
 from ..models_social import ShareRequest
 from ..social_schemas import (
     ApproveRequest,
@@ -86,10 +87,17 @@ def list_share_requests(
     scope: ProfileScope = Depends(require_profile),
     db: Session = Depends(get_session),
 ):
-    guardian = _guardian(scope)
+    _guardian(scope)
     size = cursor.clamp_limit(limit)
     wanted = [s.strip().upper() for s in (status or "PENDING_GUARDIAN").split(",") if s.strip()]
-    stmt = select(ShareRequest).where(ShareRequest.user_id == guardian.id)
+    stmt = (
+        select(ShareRequest)
+        .join(StoryRecord, StoryRecord.id == ShareRequest.story_id)
+        .where(
+            ShareRequest.user_id == scope.profile.user_id,
+            conversation_scope.condition(StoryRecord.session_id, scope.child.id),
+        )
+    )
     if "ALL" not in wanted:
         stmt = stmt.where(ShareRequest.status.in_(wanted))
     if cursor_raw:
@@ -110,8 +118,16 @@ def list_share_requests(
 
 
 def _pending(db: Session, scope: ProfileScope, request_id: str) -> ShareRequest:
-    guardian = _guardian(scope)
-    request = social_sharing.own_request(db, guardian, request_id)
+    _guardian(scope)
+    request = db.get(ShareRequest, request_id)
+    story = db.get(StoryRecord, request.story_id) if request else None
+    if (
+        request is None
+        or story is None
+        or request.user_id != scope.profile.user_id
+        or not conversation_scope.belongs(db, story.session_id, scope.child.id)
+    ):
+        raise ApiError(404, "SHARE_REQUEST_NOT_FOUND", "공유 요청을 찾을 수 없어요.")
     social_sharing.sync_edits(db, request, social_sharing.public_of(db, request))
     return request
 

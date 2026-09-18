@@ -94,8 +94,13 @@ def guardian_child(child_id: str, family: Family, db: Session) -> Child:
     return child
 
 
+def permission_enabled(child: Child, key: str) -> bool:
+    """음성은 미설정 시 허용한다. 저장된 거부와 다른 권한의 기본값은 유지한다."""
+    return bool((child.permissions or {}).get(key, key == "voice"))
+
+
 def require_permission(child: Child, key: str) -> None:
-    if not (child.permissions or {}).get(key):
+    if not permission_enabled(child, key):
         raise HTTPException(status_code=403, detail=f"permission_required:{key}")
 
 

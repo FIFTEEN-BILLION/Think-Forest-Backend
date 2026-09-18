@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ... import clock
+from ...auth import permission_enabled
 from ...config import get_settings
 from ...db import get_session
 from ...models import Child
@@ -103,9 +104,10 @@ def settings_of(db: Session, profile: ChildProfile) -> ProfileSettings:
     return row
 
 
-def settings_out(row: ProfileSettings) -> SettingsOut:
+def settings_out(row: ProfileSettings, child: Child) -> SettingsOut:
     return SettingsOut(
         profile_id=row.profile_id,
+        voice_enabled=permission_enabled(child, "voice"),
         tts_enabled=row.tts_enabled,
         guardian_preview_enabled=row.guardian_preview_enabled,
         theme=row.theme,
@@ -274,7 +276,7 @@ def get_settings_(
     row = settings_of(db, scope.profile)
     db.commit()
     response.headers["ETag"] = f'"{row.version}"'
-    return SettingsResponse(settings=settings_out(row))
+    return SettingsResponse(settings=settings_out(row, scope.child))
 
 
 @router.patch("/{profile_id}/settings", response_model=SettingsResponse)
@@ -293,6 +295,11 @@ def update_settings(
     if not fields:
         raise ApiError(400, "INVALID_INPUT", "바꿀 내용이 없어요.", {"fields": ["body"]})
     previous_days = row.retention_days
+    if "voice_enabled" in fields:
+        enabled = fields.pop("voice_enabled")
+        if enabled is None:
+            raise ApiError(400, "INVALID_INPUT", "음성 사용 여부를 선택해 주세요.", {"fields": ["voiceEnabled"]})
+        scope.child.permissions = {**(scope.child.permissions or {}), "voice": enabled}
     for name, value in fields.items():
         setattr(row, name, value)
     row.version += 1
@@ -301,7 +308,7 @@ def update_settings(
     notice = _retention_notice(previous_days, row.retention_days, now)
     db.commit()
     response.headers["ETag"] = f'"{row.version}"'
-    return SettingsResponse(settings=settings_out(row), retention_notice=notice)
+    return SettingsResponse(settings=settings_out(row, scope.child), retention_notice=notice)
 
 
 def _retention_notice(previous_days: int, days: int, now) -> RetentionNotice | None:

@@ -22,6 +22,7 @@ from .routers import (
     guardian_links,
     home,
     notifications,
+    path_sessions,
     profiles,
     reports,
     sharing,
@@ -53,6 +54,7 @@ router.include_router(reports.router)
 router.include_router(admin.router)
 # 활동·주제 운영
 router.include_router(activities.router)
+router.include_router(path_sessions.router)
 router.include_router(topic_categories.router)
 router.include_router(admin_topics.router)
 # 음성·알림·내 데이터

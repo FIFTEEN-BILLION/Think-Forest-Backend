@@ -7,7 +7,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from ...db import get_session
-from .. import chat, cursor, idempotency
+from .. import chat, conversation_scope, cursor, idempotency
 from .. import story_engine as engine
 from ..deps import CurrentUser, require_user
 from ..errors import ApiError
@@ -38,7 +38,8 @@ def list_conversations(
 ):
     size = cursor.clamp_limit(limit)
     query = select(ConversationSession).where(
-        ConversationSession.user_id == cu.id, ConversationSession.kind == engine.KIND
+        ConversationSession.user_id == cu.id, ConversationSession.kind == engine.KIND,
+        conversation_scope.condition(ConversationSession.id, cu.child.id)
     )
     if status:
         wanted = [s.strip() for s in status.split(",") if s.strip()]

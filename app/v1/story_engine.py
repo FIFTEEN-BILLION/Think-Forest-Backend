@@ -23,7 +23,7 @@ from ..schemas.talk import PlotLLM
 from ..talks import plot as plots
 from ..talks.planner import active_delta, clip
 from ..talks.sentences import CHANGED, EXPAND_LINES, KEPT, check_sentence, has_reason
-from . import ai_gate, chat, idempotency, topic_catalog
+from . import ai_gate, chat, conversation_scope, idempotency, topic_catalog
 from .cursor import iso
 from .deps import CurrentUser
 from .errors import ApiError
@@ -349,6 +349,7 @@ def start(db: Session, cu: CurrentUser, topic_id: str) -> ConversationStartRespo
     )
     db.add(session)
     db.flush()
+    conversation_scope.bind(db, session.id, cu.child.id)
     nickname = _nickname(db, cu)
     question, options = question_for("experience", topic)
     hello = f"안녕, {vocative(nickname)}!" if nickname else "안녕!"
