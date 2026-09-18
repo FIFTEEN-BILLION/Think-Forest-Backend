@@ -78,7 +78,7 @@ def test_topic_detail_create_and_unsafe_topic(client, frozen):
 def test_home_and_me_for_new_user_then_with_activity(client, frozen):
     user = make_user()
     me = client.get("/api/v1/me", headers=user["headers"]).json()
-    assert me == {"user": {"id": user["id"], "role": "CHILD", "needsFirstGreeting": True}, "profile": None}
+    assert me == {"user": {"id": user["id"], "role": "CHILD", "needsFirstGreeting": True}, "profile": None, "profiles": []}
 
     home = client.get("/api/v1/home", headers=user["headers"]).json()
     assert home["profile"] == {"nickname": None, "needsFirstGreeting": True}
