@@ -61,6 +61,18 @@ class Settings(BaseModel):
     # refresh 쿠키 Secure 속성. http 로컬 개발에서만 false.
     auth_cookie_secure: bool = True
     # --- /v1 auth ---
+    # --- v1 library ---
+    # 단어장 복습 간격(일). 상태가 오를수록 다음 복습이 멀어진다.
+    wordbook_review_days_new: int = 1
+    wordbook_review_days_practicing: int = 3
+    wordbook_review_days_familiar: int = 7
+    # 단어 퀴즈 한 판의 문항 수(기본·최대)와 보기 수.
+    word_quiz_default_count: int = 5
+    word_quiz_max_count: int = 10
+    word_quiz_option_count: int = 4
+    # 이야기책 한 권에 담을 수 있는 이야기 수.
+    story_book_max_stories: int = 30
+    # --- end v1 library ---
 
     @property
     def ai_enabled(self) -> bool:
@@ -121,6 +133,15 @@ def get_settings() -> Settings:
         auth_dev_login=_flag(os.getenv("AUTH_DEV_LOGIN"), default=False),
         auth_cookie_secure=_flag(os.getenv("AUTH_COOKIE_SECURE")),
         # --- /v1 auth ---
+        # --- v1 library ---
+        wordbook_review_days_new=int(os.getenv("WORDBOOK_REVIEW_DAYS_NEW") or 1),
+        wordbook_review_days_practicing=int(os.getenv("WORDBOOK_REVIEW_DAYS_PRACTICING") or 3),
+        wordbook_review_days_familiar=int(os.getenv("WORDBOOK_REVIEW_DAYS_FAMILIAR") or 7),
+        word_quiz_default_count=int(os.getenv("WORD_QUIZ_DEFAULT_COUNT") or 5),
+        word_quiz_max_count=int(os.getenv("WORD_QUIZ_MAX_COUNT") or 10),
+        word_quiz_option_count=int(os.getenv("WORD_QUIZ_OPTION_COUNT") or 4),
+        story_book_max_stories=int(os.getenv("STORY_BOOK_MAX_STORIES") or 30),
+        # --- end v1 library ---
     )
 
 
