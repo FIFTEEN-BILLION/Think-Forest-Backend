@@ -55,7 +55,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload
 ```
 
 - API 문서: <http://127.0.0.1:8010/docs> — 8000번 포트가 비어 있으면 `--port 8000` 도 됩니다.
-- 로컬 DB: 처음 실행하면 `./data/thinkforest.db`(SQLite)가 생깁니다. Git 에는 올라가지 않습니다.
+- 로컬 DB: `DATABASE_URL`을 비우거나 공백으로 두면 `backend/data/thinkforest.db`(SQLite)를 사용합니다. 상대 SQLite 경로는 실행 위치와 관계없이 백엔드 폴더를 기준으로 해석합니다. Git 에는 올라가지 않습니다. 기존 로컬 구현의 DB를 사용한다면 [develop 통합 기록과 이관 필요 사항](./INTEGRATION_NOTES.md)을 먼저 확인합니다.
 - 검사: `ruff check . && pytest`
 
 > Python 3.10 이상에서 동작합니다(CI 는 3.11).

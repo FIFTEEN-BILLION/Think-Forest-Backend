@@ -155,7 +155,7 @@ def get_settings() -> Settings:
         openai_timeout_s=float(os.getenv("OPENAI_TIMEOUT_S") or 20),
         child_data_mode="child" if os.getenv("CHILD_DATA_MODE") == "child" else "demo",
         ai_switch=_flag(os.getenv("AI_ENABLED")),
-        database_url=os.getenv("DATABASE_URL") or "sqlite:///./data/thinkforest.db",
+        database_url=(os.getenv("DATABASE_URL") or "").strip() or "sqlite:///./data/thinkforest.db",
         openai_transcribe_model=os.getenv("OPENAI_TRANSCRIBE_MODEL") or "gpt-transcribe",
         openai_realtime_model=os.getenv("OPENAI_REALTIME_MODEL") or "gpt-live-transcribe",
         moderation_model=os.getenv("OPENAI_MODERATION_MODEL") or "omni-moderation-latest",
