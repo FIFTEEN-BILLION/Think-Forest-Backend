@@ -79,7 +79,8 @@ def test_fallback_first_greeting_asks_one_item_at_a_time_and_completes(client, f
 
     assert goal["profileDraft"]["growthGoal"] == "궁금한 걸 질문하는 힘"
     assert goal["status"] == "READY_TO_FINISH" and goal["readiness"] == {"ready": True, "progress": 100, "missing": []}
-    assert "마치기 버튼" in goal["assistantMessage"]["content"]
+    assert "마지막으로 한 번 확인" in goal["assistantMessage"]["content"]
+    assert goal["nextInteraction"]["options"][0]["id"] == "CONFIRM_PROFILE"
 
     tick(frozen, 20)
     more = reply(client, user, session_id, "나는 수영도 잘해").json()  # 준비된 뒤에도 계속 이야기할 수 있다
@@ -202,6 +203,34 @@ def test_client_message_id_replay_and_unsafe_content(client, frozen):
         assert not any("대통령" in c for c in session.scalars(select(ConversationMessage.content)).all())
         assert [e.category for e in session.scalars(select(SafetyEvent)).all()] == ["politics"]
     assert len(client.get(f"{BASE}/{session_id}", headers=user["headers"]).json()["messages"]) == 3
+
+
+def test_final_profile_review_restores_and_corrects_all_three_fields(client, frozen):
+    user = make_user()
+    sid = begin(client, user)["sessionId"]
+    summary = fill_profile(client, user, sid, frozen)[-1]
+    assert "이름(별명): 별" in summary["assistantMessage"]["content"]
+    assert "소속: 초등학교 2학년" in summary["assistantMessage"]["content"]
+    assert "좋아하는 것: 공룡" in summary["assistantMessage"]["content"]
+    restored = client.get(f"{BASE}/{sid}", headers=user["headers"]).json()
+    assert restored["currentInteraction"] == summary["nextInteraction"]
+    for option, text, field, expected in [
+        ("EDIT_NICKNAME", "내 이름은 하늘이야", "nickname", "하늘"),
+        ("EDIT_SCHOOL", "홈스쿨", "schoolOrGroup", "홈스쿨"),
+        ("EDIT_INTEREST", "고양이랑 축구를 좋아해", "interests", ["고양이", "축구"]),
+    ]:
+        asked = reply(client, user, sid, option=option).json()
+        assert asked["nextInteraction"]["type"] == "TEXT"
+        corrected = reply(client, user, sid, text).json()
+        assert corrected["profileDraft"][field] == expected
+        assert corrected["nextInteraction"]["options"][0]["id"] == "CONFIRM_PROFILE"
+        assert corrected["completion"] is None
+    confirmed = reply(client, user, sid, option="CONFIRM_PROFILE", cmid="confirmed-profile")
+    assert confirmed.status_code == 200
+    saved = confirmed.json()["completion"]["profile"]
+    assert saved["nickname"] == "하늘" and saved["schoolOrGroup"] == "홈스쿨"
+    assert saved["interests"] == ["고양이", "축구"]
+    assert reply(client, user, sid, option="CONFIRM_PROFILE", cmid="confirmed-profile").json() == confirmed.json()
 
 
 def test_other_user_cannot_read_or_answer_session(client, frozen):

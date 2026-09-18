@@ -21,10 +21,10 @@ from ..models import Child
 from ..safety import topics as sensitive
 from ..services import usage
 from ..talks.planner import clip
-from . import ai_gate, report_prompts
+from . import ai_gate, conversation_scope, report_prompts
 from .cursor import iso
 from .errors import ApiError
-from .models_conversation import ConversationMessage, ConversationSession, StoryRecord
+from .models_conversation import ChildProfile, ConversationMessage, ConversationSession, StoryRecord
 from .report_schemas import (
     ActivityCounts,
     CategoryCount,
@@ -95,12 +95,18 @@ class Records:
         return [clip(m.content, QUOTE_LIMIT) for m in said[-MAX_QUOTES:]]
 
 
-def collect(db: Session, user_id: str, from_day: date, to_day: date) -> Records:
+def collect(db: Session, user_id: str, from_day: date, to_day: date, profile_id: str | None = None) -> Records:
     start, end = period_bounds(from_day, to_day)
+    profile = db.get(ChildProfile, profile_id) if profile_id else None
+    if profile:
+        user_id = profile.user_id
     stories = list(
         db.scalars(
             select(StoryRecord).where(
-                StoryRecord.user_id == user_id, StoryRecord.created_at >= start, StoryRecord.created_at < end
+                StoryRecord.user_id == user_id,
+                StoryRecord.created_at >= start,
+                StoryRecord.created_at < end,
+                conversation_scope.condition(StoryRecord.session_id, profile.child_id) if profile else True,
             )
         )
     )
@@ -108,6 +114,7 @@ def collect(db: Session, user_id: str, from_day: date, to_day: date) -> Records:
         db.scalars(
             select(ConversationSession).where(
                 ConversationSession.user_id == user_id,
+                conversation_scope.condition(ConversationSession.id, profile.child_id) if profile else True,
                 ConversationSession.kind == "STORY",
                 ConversationSession.created_at < end,
                 ConversationSession.last_message_at >= start,
@@ -118,7 +125,8 @@ def collect(db: Session, user_id: str, from_day: date, to_day: date) -> Records:
     messages = (
         list(
             db.scalars(
-                select(ConversationMessage).where(
+                select(ConversationMessage)
+                .where(
                     ConversationMessage.session_id.in_(ids),
                     ConversationMessage.role == "USER",
                     ConversationMessage.created_at >= start,
@@ -188,7 +196,7 @@ def progress(db: Session, user_id: str, profile_id: str, period: str) -> Progres
     days = PERIOD_DAYS[period]
     to_day = kst_date(clock.now())
     from_day = to_day - timedelta(days=days - 1)
-    records = collect(db, user_id, from_day, to_day)
+    records = collect(db, user_id, from_day, to_day, profile_id)
     activity, observed = counts(records)
     breakdown = Counter(s.category for s in records.stories)
     return ProgressResponse(
@@ -281,7 +289,9 @@ def refresh_status(db: Session, row: ReportSummary) -> ReportSummary:
     """원본 기록이 달라졌으면 STALE 로 표시한다(내용은 그대로 둔다)."""
     if row.status == "STALE":
         return row
-    records = collect(db, row.user_id, date.fromisoformat(row.period_from), date.fromisoformat(row.period_to))
+    records = collect(
+        db, row.user_id, date.fromisoformat(row.period_from), date.fromisoformat(row.period_to), row.profile_id
+    )
     if records.source_version != row.source_version:
         row.status = "STALE"
     return row

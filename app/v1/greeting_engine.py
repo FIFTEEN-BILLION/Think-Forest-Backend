@@ -2,6 +2,7 @@
 
 - 첫 메시지는 정확히 `자기소개해볼까?`.
 - 한 번에 부족한 항목 하나만 묻고, 채운 항목은 다시 묻지 않는다(순서는 FIELDS).
+  마지막에는 이름·소속·관심사를 함께 재확인한다.
 - AI 가 허용되면 `first_greeting.extract` 로 뽑고, 막히거나 실패하면
   기존 첫 만남 규칙(`talks/onboarding.py`)으로 뽑는다.
 - 학교 이름은 저장하지 않는다. `schoolOrGroup` 은 종류(초등학교·홈스쿨·유치원·기타)만.
@@ -20,7 +21,7 @@ from ..prompts import v1_conversation as prompt
 from ..safety import topics as sensitive
 from ..talks import onboarding as ob
 from ..talks.planner import active_delta, clip
-from . import ai_gate, chat, idempotency
+from . import ai_gate, chat, conversation_scope, idempotency
 from .cursor import iso
 from .deps import CurrentUser
 from .errors import ApiError
@@ -43,6 +44,13 @@ FIRST_MESSAGE = "자기소개해볼까?"
 FIELDS: tuple[str, ...] = ("NICKNAME", "GRADE_OR_AGE", "INTEREST", "INTEREST_DETAIL", "GROWTH_GOAL")
 SCHOOL_KINDS = {"elementary": "초등학교", "homeschool": "홈스쿨", "kindergarten": "유치원", "other": "기타"}
 AFFILIATION_OF = {"초등학교": "elementary", "홈스쿨": "homeschool", "유치원": "other", "기타": "other"}
+PROFILE_OPTIONS = [
+    {"id": "CONFIRM_PROFILE", "label": "맞아요, 첫 인사 마치기"},
+    {"id": "EDIT_NICKNAME", "label": "이름·별명 고칠래"},
+    {"id": "EDIT_SCHOOL", "label": "소속 고칠래"},
+    {"id": "EDIT_INTEREST", "label": "좋아하는 것 고칠래"},
+]
+EDIT_FIELDS = {"EDIT_NICKNAME": "NICKNAME", "EDIT_SCHOOL": "SCHOOL_OR_GROUP", "EDIT_INTEREST": "INTEREST"}
 
 _YES = re.compile(r"^(응+|어+|웅+|네|예|그래|좋아|ㅇㅇ|오케이|알겠어|해\s*볼래|할래)[.!~\s]*$")
 _GREETING = re.compile(r"^(안녕+|하이|헬로|반가워|hi|hello)", re.IGNORECASE)
@@ -172,6 +180,8 @@ def parse_list(text: str) -> list[str]:
     이음말이 없으면 기존 첫 만남 규칙(`ob.parse_list`)처럼 띄어쓰기로 나눈다.
     """
     tail_removed = _LIST_PREFIX.sub("", ob._LIKE_TAIL.sub("", (text or "").strip()))
+    # '고양이랑'의 '이'는 조사 일부가 아니라 낱말 일부다.
+    tail_removed = re.sub(r"(" + "|".join(sorted(_KEEP_I)) + r")랑\s+", r"\1, ", tail_removed)
     parts = [p.strip() for p in _LIST_JOIN.split(tail_removed) if p and p.strip()]
     if len(parts) <= 1:
         parts = [p for p in ob._LIST_SPLIT.split(tail_removed) if p]
@@ -258,6 +268,8 @@ def question_for(field: str | None, draft: dict) -> str:
         return "티키가 너를 뭐라고 부르면 좋을까? 별명도 좋아!"
     if field == "GRADE_OR_AGE":
         return "너는 몇 학년이야? 몇 살인지 말해 줘도 좋아."
+    if field == "SCHOOL_OR_GROUP":
+        return "소속을 다시 알려 줄래? 초등학교, 유치원, 홈스쿨, 기타 중에서 말해 줘. 학교 이름은 말하지 않아도 돼."
     if field == "INTEREST":
         return "너는 뭘 좋아해? 놀이, 동물, 음식 뭐든 괜찮아!"
     if field == "INTEREST_DETAIL":
@@ -265,9 +277,12 @@ def question_for(field: str | None, draft: dict) -> str:
         return f"{josa(interest, '이', '가')} 왜 좋아? 기억나는 일이 있으면 들려줘!"
     if field == "GROWTH_GOAL":
         return "마지막 질문! 티키랑 이야기하면서 뭘 더 잘하고 싶어? ‘질문하기’, ‘내 생각 말하기’처럼 말해 줘."
+    school = draft["schoolOrGroup"] or draft["gradeOrAgeBand"] or "아직 알려주지 않았어"
+    interests = ", ".join(draft["interests"])
     return (
-        f"고마워, {vocative(draft['nickname'])}! 이제 티키가 너를 잘 알 것 같아. "
-        "더 하고 싶은 말이 있으면 해 줘. 다 됐으면 마치기 버튼을 눌러 줘."
+        f"마지막으로 한 번 확인할게!\n이름(별명): {draft['nickname']}\n"
+        f"소속: {school}\n좋아하는 것: {interests}\n"
+        "이렇게 기억하면 될까? 맞으면 ‘맞아요, 첫 인사 마치기’ 버튼을 누르고, 다른 내용은 고쳐 줘."
     )
 
 
@@ -325,6 +340,7 @@ def start_or_resume(db: Session, cu: CurrentUser) -> GreetingSessionOut:
         select(ConversationSession)
         .where(
             ConversationSession.user_id == cu.id,
+            conversation_scope.condition(ConversationSession.id, cu.child.id),
             ConversationSession.kind == KIND,
             ConversationSession.status.in_(chat.OPEN_STATUSES),
         )
@@ -345,6 +361,7 @@ def start_or_resume(db: Session, cu: CurrentUser) -> GreetingSessionOut:
     )
     db.add(session)
     db.flush()
+    conversation_scope.bind(db, session.id, cu.child.id)
     data = chat.interaction("ask", FIRST_MESSAGE, field="NICKNAME")
     chat.add_assistant(db, session, FIRST_MESSAGE, "fallback", data)
     session.current_interaction = data
@@ -408,21 +425,24 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
     )
 
     draft, source, reaction, ai_question = before, "fallback", None, None
+    confirming = (current or {}).get("move") == "confirm_profile"
+    correcting = (current or {}).get("move") == "correct_profile"
+    extraction_draft = {**before, "interests": []} if correcting and asked == "INTEREST" else before
     if option_id:
-        end = "clear" if option_id == "END" else "none"
+        end = "clear" if option_id in ("END", "CONFIRM_PROFILE") else "none"
         if option_id == "CONTINUE":
             reaction = "좋아, 계속 이야기하자!"
     else:
-        end = chat.end_intent(raw)
+        end = "clear" if confirming and _YES.fullmatch(raw) else chat.end_intent(raw)
         if end != "clear" and ai_gate.budget(cu.child, session) is None:
             try:
                 out = ai_gate.call(
                     purpose="first_greeting.extract",
                     instructions=prompt.greeting_instructions(),
-                    user_input=prompt.greeting_input(before, missing_fields(before), masked),
+                    user_input=prompt.greeting_input(extraction_draft, missing_fields(extraction_draft), masked),
                     schema=FirstGreetingLLM,
                 )
-                draft, source = merge_ai(before, out, raw), "ai"
+                draft, source = merge_ai(extraction_draft, out, raw), "ai"
                 end = chat.combine_end_intent(end, out.end_intent)
                 reaction = chat.safe_line(out.reaction, 60)
                 question = chat.safe_line(out.question, 80)
@@ -431,14 +451,22 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
             except ai_gate.LlmError:
                 source = "fallback"
         if source == "fallback" and end == "none":
-            draft = apply_rules(before, asked, raw, masked)
+            draft = apply_rules(extraction_draft, asked, raw, masked)
         _record_facts(db, session, before, draft, user_message.id, 0.8 if source == "ai" else 0.6)
     session.readiness = {"draft": draft}
     missing = missing_fields(draft)
 
     completion, next_data = None, None
-    if end == "clear" and not missing:
+    finish_confirmed = end == "clear" and not missing and confirming
+    if option_id in EDIT_FIELDS:
+        field = EDIT_FIELDS[option_id]
+        content = question_for(field, draft)
+        next_data = chat.interaction("correct_profile", content, field=field)
+    elif finish_confirmed:
         content = f"좋아, {vocative(draft['nickname'])}! 알려 준 것 잘 기억할게. 다음에 또 이야기하자!"
+    elif not missing:
+        content = question_for(None, draft)
+        next_data = chat.interaction("confirm_profile", content, PROFILE_OPTIONS)
     elif end == "clear":
         question = question_for(missing[0], draft)
         content = f"아직 티키가 기억하고 싶은 게 하나 있어! {question}"
@@ -458,7 +486,7 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
     session.current_interaction = next_data
     session.status = "READY_TO_FINISH" if not missing else "ACTIVE"
     session.updated_at = now
-    if end == "clear" and not missing:
+    if finish_confirmed:
         completion = complete(db, cu, session)
     response = GreetingMessageResponse(
         user_message=chat.message_out(user_message),

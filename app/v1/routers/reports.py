@@ -79,7 +79,7 @@ def create_summary(
     if from_day > to_day or (to_day - from_day).days >= MAX_SUMMARY_DAYS:
         raise ApiError(400, "INVALID_INPUT", "입력 형식을 확인해 주세요.", {"fields": ["from", "to"]})
 
-    records = report_engine.collect(db, scope.user.id, from_day, to_day)
+    records = report_engine.collect(db, scope.profile.user_id, from_day, to_day, scope.profile_id)
     version = records.source_version
     rows = list(
         db.scalars(
@@ -161,7 +161,7 @@ def _eligibility(db: Session, scope: ProfileScope, period: str) -> EligibilityRe
     need = report_engine.min_days()
     remaining = max(0, need - days)
     first_day, last_day = report_engine.month_bounds(period)
-    records = report_engine.collect(db, scope.user.id, first_day, min(last_day, today))
+    records = report_engine.collect(db, scope.profile.user_id, first_day, min(last_day, today), scope.profile_id)
     existing = db.scalar(
         select(GuardianConsultation).where(
             GuardianConsultation.profile_id == scope.profile_id, GuardianConsultation.period == period
@@ -228,7 +228,7 @@ def create_consultation(
             {"daysRemaining": check.days_remaining, "completedStories": check.completed_stories, "period": period},
         )
     first_day, last_day = report_engine.month_bounds(period)
-    records = report_engine.collect(db, scope.user.id, first_day, min(last_day, today))
+    records = report_engine.collect(db, scope.profile.user_id, first_day, min(last_day, today), scope.profile_id)
     generated = report_engine.consultation_ai(scope.child, records, period)
     row = GuardianConsultation(
         user_id=scope.user.id,

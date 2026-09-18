@@ -373,6 +373,10 @@ def _heard_out(items: Iterable[dict]) -> list[Heard]:
 @router.post("/path/teach", response_model=PathTeachResponse)
 def teach(req: PathTeachRequest) -> PathTeachResponse:
     _guard_origin(req.input_origin)
+    return teach_program(req)
+
+
+def teach_program(req: PathTeachRequest, block_reason: str | None = None) -> PathTeachResponse:
     text, blocked = _prepare(req.text, "path.teach")
     chosen = ""
     if req.pending_clarify and not blocked:
@@ -411,6 +415,8 @@ def teach(req: PathTeachRequest) -> PathTeachResponse:
 
     if blocked:
         return fallback("blocked")
+    if block_reason:
+        return fallback(block_reason)
     try:
         out = call_structured(
             purpose="path.teach",
@@ -546,6 +552,10 @@ def _leaks_fix(text: str) -> bool:
 @router.post("/path/react", response_model=PathReactResponse)
 def react(req: PathReactRequest) -> PathReactResponse:
     _guard_origin(req.input_origin)
+    return react_program(req)
+
+
+def react_program(req: PathReactRequest, block_reason: str | None = None) -> PathReactResponse:
     text, blocked = _prepare(req.text, "path.react") if req.text.strip() else ("", False)
     result = req.result
     candidates = req.challenge_candidates
@@ -574,6 +584,8 @@ def react(req: PathReactRequest) -> PathReactResponse:
 
     if blocked:
         return fallback("blocked")
+    if block_reason:
+        return fallback(block_reason)
     try:
         out = call_structured(
             purpose="path.react",

@@ -28,17 +28,30 @@ from ..models import (
     Word,
     WordQuiz,
 )
-from . import cursor
+from . import conversation_scope, cursor
 from .models import AccessToken, User
+from .models_accounts import Consent, GuardianInvitation, ProfileMember, ProfileSettings
+from .models_activity import ActivitySession, TopicCategoryRow
 from .models_conversation import (
     ChildProfile,
     ConversationFact,
     ConversationMessage,
+    ConversationOwner,
     ConversationSession,
     StoryRecord,
     UserTopic,
 )
+from .models_library import StoryBook, StoryBookItem, WordbookEntry, WordQuizQuestion, WordQuizV1
 from .models_ops import DataJob, DeletionRequest, Notification, NotificationSetting, PushDevice
+from .models_social import (
+    CommunityReport,
+    ConsultationQuestion,
+    GuardianConsultation,
+    PublicStory,
+    ReportSummary,
+    ShareRequest,
+    StoryRecommendation,
+)
 
 DOWNLOAD_PREFIX = "dlt_"
 SCOPES = ("ALL_CHILD_DATA", "CONVERSATIONS", "STORIES", "WORDBOOK", "EXPORTS")
@@ -53,17 +66,25 @@ def counts(db: Session, user: User, child: Child) -> dict[str, int]:
     def count(model, *where) -> int:
         return int(db.scalar(select(func.count()).select_from(model).where(*where)) or 0)
 
-    sessions = select(ConversationSession.id).where(ConversationSession.user_id == user.id)
+    profile = db.scalar(select(ChildProfile).where(ChildProfile.child_id == child.id))
+    profile_id = profile.id if profile else ""
+    sessions = _session_ids(user, child)
     return {
-        "profiles": count(ChildProfile, ChildProfile.user_id == user.id),
-        "conversations": count(ConversationSession, ConversationSession.user_id == user.id),
+        "profiles": count(ChildProfile, ChildProfile.child_id == child.id),
+        "conversations": count(ConversationSession, ConversationSession.id.in_(sessions)),
         "messages": count(ConversationMessage, ConversationMessage.session_id.in_(sessions)),
-        "stories": count(StoryRecord, StoryRecord.user_id == user.id),
+        "stories": count(StoryRecord, StoryRecord.session_id.in_(sessions)),
         "topics": count(UserTopic, UserTopic.user_id == user.id),
-        "words": count(Word, Word.child_id == child.id),
-        "sharedItems": count(SharedItem, SharedItem.child_id == child.id),
+        "words": count(Word, Word.child_id == child.id) + count(WordbookEntry, WordbookEntry.profile_id == profile_id),
+        "books": count(StoryBook, StoryBook.profile_id == profile_id),
+        "activities": count(ActivitySession, ActivitySession.profile_id == profile_id),
+        "reports": count(ReportSummary, ReportSummary.profile_id == profile_id),
+        "sharedItems": count(SharedItem, SharedItem.child_id == child.id)
+        + count(
+            PublicStory, PublicStory.story_id.in_(select(StoryRecord.id).where(StoryRecord.session_id.in_(sessions)))
+        ),
         "notifications": count(Notification, Notification.user_id == user.id),
-        "exports": count(DataJob, DataJob.user_id == user.id),
+        "exports": count(DataJob, DataJob.user_id == user.id, DataJob.profile_id == (profile.id if profile else None)),
     }
 
 
@@ -87,10 +108,10 @@ def build_export(db: Session, user: User, child: Child, include: list[str]) -> d
         "exportedAt": cursor.iso(clock.now()),
         "userId": user.id,
         "include": sorted(wanted),
-        "schemaVersion": 1,
+        "schemaVersion": 2,
     }
     if "PROFILE" in wanted:
-        profile = db.scalar(select(ChildProfile).where(ChildProfile.user_id == user.id))
+        profile = db.scalar(select(ChildProfile).where(ChildProfile.child_id == child.id))
         payload["profile"] = (
             {
                 "id": profile.id,
@@ -108,7 +129,7 @@ def build_export(db: Session, user: User, child: Child, include: list[str]) -> d
         sessions = list(
             db.scalars(
                 select(ConversationSession)
-                .where(ConversationSession.user_id == user.id)
+                .where(ConversationSession.id.in_(_session_ids(user, child)))
                 .order_by(ConversationSession.created_at)
             )
         )
@@ -150,7 +171,9 @@ def build_export(db: Session, user: User, child: Child, include: list[str]) -> d
                 "createdAt": cursor.iso(s.created_at),
             }
             for s in db.scalars(
-                select(StoryRecord).where(StoryRecord.user_id == user.id).order_by(StoryRecord.created_at)
+                select(StoryRecord)
+                .where(StoryRecord.session_id.in_(_session_ids(user, child)))
+                .order_by(StoryRecord.created_at)
             )
         ]
     if "WORDBOOK" in wanted:
@@ -164,8 +187,51 @@ def build_export(db: Session, user: User, child: Child, include: list[str]) -> d
             for w in db.scalars(select(Word).where(Word.child_id == child.id).order_by(Word.created_at))
         ]
     if "REPORTS" in wanted:
-        # 성장 리포트는 저장하지 않고 조회할 때 계산한다(B4 트랙). 내보낼 원본이 없다.
-        payload["reports"] = []
+        profile_ids = select(ChildProfile.id).where(ChildProfile.child_id == child.id)
+        payload["reports"] = [
+            {"id": row.id, "from": row.period_from, "to": row.period_to, "body": row.body, "source": row.source}
+            for row in db.scalars(select(ReportSummary).where(ReportSummary.profile_id.in_(profile_ids)))
+        ]
+        payload["consultations"] = [
+            {"id": row.id, "period": row.period, "body": row.body, "source": row.source}
+            for row in db.scalars(select(GuardianConsultation).where(GuardianConsultation.profile_id.in_(profile_ids)))
+        ]
+    profile_ids = select(ChildProfile.id).where(ChildProfile.child_id == child.id)
+    if "WORDBOOK" in wanted:
+        payload["wordbook"] += [
+            {
+                "id": w.id,
+                "word": w.word,
+                "meaning": w.meaning,
+                "example": w.example,
+                "mySentence": w.my_sentence,
+                "status": w.status,
+                "createdAt": cursor.iso(w.created_at),
+            }
+            for w in db.scalars(select(WordbookEntry).where(WordbookEntry.profile_id.in_(profile_ids)))
+        ]
+    if "STORIES" in wanted:
+        payload["books"] = [
+            {
+                "id": b.id,
+                "title": b.title,
+                "introduction": b.introduction,
+                "cover": b.cover,
+                "storyIds": list(
+                    db.scalars(
+                        select(StoryBookItem.story_id)
+                        .where(StoryBookItem.book_id == b.id)
+                        .order_by(StoryBookItem.position)
+                    )
+                ),
+            }
+            for b in db.scalars(select(StoryBook).where(StoryBook.profile_id.in_(profile_ids)))
+        ]
+    if "CONVERSATIONS" in wanted:
+        payload["activities"] = [
+            {"id": a.id, "activityId": a.activity_id, "status": a.status, "state": a.state}
+            for a in db.scalars(select(ActivitySession).where(ActivitySession.profile_id.in_(profile_ids)))
+        ]
     return payload
 
 
@@ -199,7 +265,7 @@ class DownloadInvalid(Exception):
 # ---------------------------------------------------------------- 삭제
 
 
-def hidden_scopes(db: Session, user_id: str) -> set[str]:
+def hidden_scopes(db: Session, user_id: str, child_id: str | None = None) -> set[str]:
     """삭제를 요청해 지금 숨겨야 하는 범위. 다른 트랙도 이 함수로 확인한다."""
     rows = db.scalars(
         select(DeletionRequest).where(
@@ -210,19 +276,50 @@ def hidden_scopes(db: Session, user_id: str) -> set[str]:
     )
     scopes: set[str] = set()
     for row in rows:
-        scopes.add("ALL_CHILD_DATA" if row.kind == "ACCOUNT" else row.scope)
+        if child_id is None or row.kind == "ACCOUNT" or row.child_id == child_id:
+            scopes.add("ALL_CHILD_DATA" if row.kind == "ACCOUNT" else row.scope)
     return scopes
 
 
+def _session_ids(user: User, child: Child):
+    return select(ConversationSession.id).where(
+        ConversationSession.user_id == user.id, conversation_scope.condition(ConversationSession.id, child.id)
+    )
+
+
+def _delete_derived(db: Session, user: User, child: Child) -> dict[str, int]:
+    profiles = select(ChildProfile.id).where(ChildProfile.child_id == child.id)
+    stories = select(StoryRecord.id).where(StoryRecord.session_id.in_(_session_ids(user, child)))
+    public_ids = list(db.scalars(select(PublicStory.id).where(PublicStory.story_id.in_(stories))))
+    _delete(db, StoryRecommendation, StoryRecommendation.public_story_id.in_(public_ids))
+    _delete(db, CommunityReport, CommunityReport.public_story_id.in_(public_ids))
+    _delete(db, PublicStory, PublicStory.id.in_(public_ids))
+    _delete(db, ShareRequest, ShareRequest.story_id.in_(stories))
+    books = select(StoryBook.id).where(StoryBook.profile_id.in_(profiles))
+    _delete(db, StoryBookItem, StoryBookItem.book_id.in_(books) | StoryBookItem.story_id.in_(stories))
+    _delete(db, StoryBook, StoryBook.profile_id.in_(profiles))
+    consultations = select(GuardianConsultation.id).where(GuardianConsultation.profile_id.in_(profiles))
+    _delete(db, ConsultationQuestion, ConsultationQuestion.consultation_id.in_(consultations))
+    _delete(db, GuardianConsultation, GuardianConsultation.profile_id.in_(profiles))
+    _delete(db, ReportSummary, ReportSummary.profile_id.in_(profiles))
+    _delete(db, ActivitySession, ActivitySession.profile_id.in_(profiles))
+    _delete_exports(db, user, child)
+    return {}
+
+
 def _delete_conversations(db: Session, user: User, child: Child) -> dict[str, int]:
-    session_ids = select(ConversationSession.id).where(ConversationSession.user_id == user.id)
+    session_ids = list(db.scalars(_session_ids(user, child)))
+    _delete_derived(db, user, child)
+    words = _delete_wordbook(db, child)
     result = {
+        **words,
         "messages": _delete(db, ConversationMessage, ConversationMessage.session_id.in_(session_ids)),
         "facts": _delete(db, ConversationFact, ConversationFact.session_id.in_(session_ids)),
     }
     # 이야기 정리본은 세션을 참조한다. 세션보다 먼저 지운다.
-    result["stories"] = _delete(db, StoryRecord, StoryRecord.user_id == user.id)
-    result["conversations"] = _delete(db, ConversationSession, ConversationSession.user_id == user.id)
+    result["stories"] = _delete(db, StoryRecord, StoryRecord.session_id.in_(session_ids))
+    _delete(db, ConversationOwner, ConversationOwner.session_id.in_(session_ids))
+    result["conversations"] = _delete(db, ConversationSession, ConversationSession.id.in_(session_ids))
     # 기존 대화 엔진 쪽 기록도 같은 아이 것이다.
     talk_ids = select(Talk.id).where(Talk.child_id == child.id)
     result["turns"] = _delete(db, Turn, Turn.talk_id.in_(talk_ids))
@@ -232,8 +329,9 @@ def _delete_conversations(db: Session, user: User, child: Child) -> dict[str, in
 
 
 def _delete_stories(db: Session, user: User, child: Child) -> dict[str, int]:
+    _delete_derived(db, user, child)
     return {
-        "stories": _delete(db, StoryRecord, StoryRecord.user_id == user.id),
+        "stories": _delete(db, StoryRecord, StoryRecord.session_id.in_(_session_ids(user, child))),
         "legacyStories": _delete(db, Story, Story.child_id == child.id),
         "books": _delete(db, Book, Book.child_id == child.id),
         # 공개 복사본까지 지운다(명세 22절).
@@ -242,15 +340,21 @@ def _delete_stories(db: Session, user: User, child: Child) -> dict[str, int]:
 
 
 def _delete_wordbook(db: Session, child: Child) -> dict[str, int]:
+    profiles = select(ChildProfile.id).where(ChildProfile.child_id == child.id)
+    quizzes = select(WordQuizV1.id).where(WordQuizV1.profile_id.in_(profiles))
+    _delete(db, WordQuizQuestion, WordQuizQuestion.quiz_id.in_(quizzes))
+    _delete(db, WordQuizV1, WordQuizV1.profile_id.in_(profiles))
+    current_words = _delete(db, WordbookEntry, WordbookEntry.profile_id.in_(profiles))
     return {
-        "words": _delete(db, Word, Word.child_id == child.id),
+        "words": current_words + _delete(db, Word, Word.child_id == child.id),
         "wordQuizzes": _delete(db, WordQuiz, WordQuiz.child_id == child.id),
     }
 
 
-def _delete_exports(db: Session, user: User) -> dict[str, int]:
+def _delete_exports(db: Session, user: User, child: Child) -> dict[str, int]:
     """내보내기 작업에는 아이 원문이 담겨 있다. 함께 지운다."""
-    return {"exports": _delete(db, DataJob, DataJob.user_id == user.id)}
+    profile = db.scalar(select(ChildProfile.id).where(ChildProfile.child_id == child.id))
+    return {"exports": _delete(db, DataJob, DataJob.user_id == user.id, DataJob.profile_id == profile)}
 
 
 def _delete(db: Session, model, *where) -> int:
@@ -268,43 +372,77 @@ def _scrub_child(db: Session, child: Child) -> None:
     child.profile_confirmed = False
 
 
+def _erase_child(db: Session, user: User, child: Child, scope: str) -> dict[str, int]:
+    result: dict[str, int] = {}
+    actions = []
+    if scope in ("ALL_CHILD_DATA", "CONVERSATIONS"):
+        actions.append(lambda: _delete_conversations(db, user, child))
+    if scope in ("ALL_CHILD_DATA", "STORIES"):
+        actions.append(lambda: _delete_stories(db, user, child))
+    if scope in ("ALL_CHILD_DATA", "WORDBOOK"):
+        actions.append(lambda: _delete_wordbook(db, child))
+    if scope in ("ALL_CHILD_DATA", "EXPORTS"):
+        actions.append(lambda: _delete_exports(db, user, child))
+    for action in actions:
+        for key, value in action().items():
+            result[key] = result.get(key, 0) + value
+    if scope == "ALL_CHILD_DATA":
+        profiles = select(ChildProfile.id).where(ChildProfile.child_id == child.id)
+        for model in (ProfileSettings, ProfileMember, Consent, GuardianInvitation, TopicCategoryRow):
+            _delete(db, model, model.profile_id.in_(profiles))
+        result["profiles"] = _delete(db, ChildProfile, ChildProfile.child_id == child.id)
+        _scrub_child(db, child)
+    return result
+
+
 def execute(db: Session, request: DeletionRequest) -> DeletionRequest:
-    """유예기간이 지난 요청을 실제로 처리한다. 지운 개수만 남긴다."""
+    """삭제 요청 시점의 아이를 대상으로 처리한다. 기본 프로필 변경이 삭제 대상을 바꾸지 않는다."""
     user = db.get(User, request.user_id)
-    child = db.get(Child, user.child_id) if user else None
+    child = db.get(Child, request.child_id or user.child_id) if user else None
     if user is None or child is None:
         request.status = "FAILED"
         request.completed_at = clock.now()
         return request
     request.status = "RUNNING"
     result: dict[str, int] = {}
-    scope = "ALL_CHILD_DATA" if request.kind == "ACCOUNT" else request.scope
-    if scope in ("ALL_CHILD_DATA", "CONVERSATIONS"):
-        result |= _delete_conversations(db, user, child)
-    if scope in ("ALL_CHILD_DATA", "STORIES"):
-        for key, value in _delete_stories(db, user, child).items():
-            result[key] = result.get(key, 0) + value
-    if scope in ("ALL_CHILD_DATA", "WORDBOOK"):
-        result |= _delete_wordbook(db, child)
-    if scope in ("ALL_CHILD_DATA", "EXPORTS"):
-        result |= _delete_exports(db, user)
-    if scope == "ALL_CHILD_DATA":
-        result["topics"] = _delete(db, UserTopic, UserTopic.user_id == user.id)
-        result["profiles"] = _delete(db, ChildProfile, ChildProfile.user_id == user.id)
-        _scrub_child(db, child)
     if request.kind == "ACCOUNT":
+        profiles = list(db.scalars(select(ChildProfile).where(ChildProfile.user_id == user.id)))
+        children = []
+        if not profiles:
+            children.append(child)
+        for profile in profiles:
+            # 다른 보호자가 계속 관리하는 프로필의 기록은 보존한다.
+            remaining = db.scalar(
+                select(ProfileMember).where(
+                    ProfileMember.profile_id == profile.id,
+                    ProfileMember.user_id != user.id,
+                    ProfileMember.revoked_at.is_(None),
+                )
+            )
+            if remaining:
+                result["preservedProfiles"] = result.get("preservedProfiles", 0) + 1
+            else:
+                target = db.get(Child, profile.child_id)
+                if target:
+                    children.append(target)
+        for target in children:
+            for key, value in _erase_child(db, user, target, "ALL_CHILD_DATA").items():
+                result[key] = result.get(key, 0) + value
+        result["topics"] = _delete(db, UserTopic, UserTopic.user_id == user.id)
+        _delete(db, DataJob, DataJob.user_id == user.id)
         result |= _close_account(db, user)
+    else:
+        result = _erase_child(db, user, child, request.scope)
     request.status = "SUCCEEDED"
     request.completed_at = clock.now()
-    request.result = result  # JSON 컬럼은 새 객체로 바꿔 넣는다
+    request.result = result
     return request
 
 
 def _close_account(db: Session, user: User) -> dict[str, int]:
     """계정 탈퇴 — 기기·알림·토큰을 지우고 사용자를 DELETED 로 둔다.
 
-    보호자 계정이면 다른 보호자가 그 아이에 연결돼 있는지 먼저 본다(B1 트랙의 guardian_links).
-    지금은 계정 하나에 아이 하나라 다른 연결이 없다.
+    다른 보호자가 연결된 프로필은 execute 에서 보존하고 탈퇴 계정의 연결만 철회한다.
     """
     counts = {
         "devices": _delete(db, PushDevice, PushDevice.user_id == user.id),
@@ -312,6 +450,8 @@ def _close_account(db: Session, user: User) -> dict[str, int]:
         "notificationSettings": _delete(db, NotificationSetting, NotificationSetting.user_id == user.id),
     }
     now = clock.now()
+    for member in db.scalars(select(ProfileMember).where(ProfileMember.user_id == user.id)):
+        member.revoked_at = member.revoked_at or now
     for token in db.scalars(select(AccessToken).where(AccessToken.user_id == user.id)):
         token.revoked_at = token.revoked_at or now
     user.status = "DELETED"

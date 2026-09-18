@@ -109,7 +109,11 @@ def empty_state(activity: Activity, keyword: str = "") -> dict:
             "finalReason": "",
         }
     if activity.id == PATH_ACTIVITY:
-        state["path"] = {"runs": 0, "wins": 0, "awaitingChallenge": False, "noChallengeLeft": False}
+        state["path"] = {
+            "runs": 0, "wins": 0, "awaitingChallenge": False, "noChallengeLeft": False,
+            "map": {"id": "m1", "start": 22, "heading": "up", "goal": 14, "puddles": [7]},
+            "program": [], "turns": [],
+        }
     return state
 
 

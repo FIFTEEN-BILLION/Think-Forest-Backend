@@ -117,6 +117,39 @@ def test_existing_account_gets_its_membership_created_on_first_read(client, froz
 # --- 수정과 If-Match ----------------------------------------------------------------
 
 
+def test_voice_setting_defaults_on_and_persists_per_child(client, frozen):
+    owner = account()
+    first = new_profile(client, owner)
+    second = new_profile(client, owner, "바다")
+    path = f"{PROFILES}/{first['id']}/settings"
+    assert client.get(path, headers=owner["headers"]).json()["settings"]["voiceEnabled"] is True
+    with next(db.get_session()) as session:
+        profile = session.get(ChildProfile, first["id"])
+        session.get(Child, profile.child_id).permissions = {"browse_shared": True}
+        session.commit()
+    disabled = client.patch(path, json={"voiceEnabled": False, "version": 1}, headers=owner["headers"])
+    assert disabled.status_code == 200 and disabled.json()["settings"]["voiceEnabled"] is False
+    assert client.get(path, headers=owner["headers"]).json()["settings"]["voiceEnabled"] is False
+    assert client.post("/api/v1/speech/stream-tickets", json={}, headers=owner["headers"]).status_code == 403
+    with next(db.get_session()) as session:
+        profile = session.get(ChildProfile, first["id"])
+        assert session.get(Child, profile.child_id).permissions == {"voice": False, "browse_shared": True}
+    other = client.get(f"{PROFILES}/{second['id']}/settings", headers=owner["headers"])
+    assert other.json()["settings"]["voiceEnabled"] is True
+    stale = client.patch(path, json={"voiceEnabled": True, "version": 1}, headers=owner["headers"])
+    assert stale.status_code == 409
+    unrelated = client.patch(path, json={"theme": "DARK"}, headers=owner["headers"])
+    assert unrelated.json()["settings"]["voiceEnabled"] is False
+    assert client.patch(path, json={"voiceEnabled": None}, headers=owner["headers"]).status_code == 400
+    guardian = account()
+    link_guardian(client, owner, guardian, first["id"], ["VIEW_PROFILE"])
+    forbidden = client.patch(path, json={"voiceEnabled": True}, headers=guardian["headers"])
+    assert forbidden.status_code == 403
+    enabled = client.patch(path, json={"voiceEnabled": True}, headers=owner["headers"])
+    assert enabled.json()["settings"]["voiceEnabled"] is True
+    assert client.post("/api/v1/speech/stream-tickets", json={}, headers=owner["headers"]).status_code == 201
+
+
 def test_profile_patch_checks_version_and_syncs_child_row(client, frozen):
     user = account()
     profile = new_profile(client, user, "하늘")
@@ -164,7 +197,7 @@ def test_settings_patch_tells_what_gets_deleted(client, frozen):
     assert shorter.status_code == 200
     body = shorter.json()
     assert body["settings"] == {
-        "profileId": profile["id"], "ttsEnabled": True, "guardianPreviewEnabled": True,
+        "profileId": profile["id"], "voiceEnabled": True, "ttsEnabled": True, "guardianPreviewEnabled": True,
         "theme": "DARK", "retentionDays": 30, "version": 2, "updatedAt": "2026-09-14T01:00:00Z",
     }  # fmt: skip
     notice = body["retentionNotice"]
