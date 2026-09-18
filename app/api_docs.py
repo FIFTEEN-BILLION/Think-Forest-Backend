@@ -850,6 +850,270 @@ EXAMPLES.update(
 )
 # --- end v1 social ---
 
+
+# --- v1 library ---
+_V1L_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1L_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1L_ERRORS = (
+    "오류는 `{error: {code, message, details, requestId}}` 형식입니다. "
+    "다른 아이의 기록은 `404`(있다는 사실도 알리지 않습니다), 먼저 고쳐진 기록은 `409 VERSION_CONFLICT`."
+)
+TAGS.update(
+    {
+        "v1-wordbook": (
+            "v1-7. 단어장·단어 퀴즈",
+            "대화에서 만난 낱말을 담고(뜻풀이는 티키가), 복습 퀴즈로 다시 만납니다. "
+            "점수는 만들지 않습니다 — 맞히면 낱말 상태(NEW→PRACTICING→FAMILIAR)가 오르고 다음 복습이 멀어집니다.",
+        ),
+        "v1-books": (
+            "v1-8. 이야기책",
+            "완성한 이야기를 골라 한 권으로 묶습니다. 책을 지워도 이야기는 책장에 그대로 남습니다.",
+        ),
+    }
+)
+OPERATIONS.update(
+    {
+        ("PATCH", "/api/v1/stories/{story_id}"): (
+            "이야기 고쳐 쓰기",
+            "아이가 제목·요약·본문·`thoughtJourney` 를 자기 말로 고칩니다. AI 정리본 원본은 따로 보관되어 바뀌지 않습니다.\n\n"
+            "지금 보고 있는 판을 `If-Match: \"3\"` 헤더나 본문 `version` 으로 함께 보냅니다. 값이 다르면 `409 VERSION_CONFLICT` "
+            "(`details.currentVersion`), 아예 없으면 `400 INVALID_INPUT`. 저장되면 `version` 이 1 올라갑니다.\n\n" + _V1L_ERRORS,
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/stories/{story_id}"): (
+            "이야기 지우기",
+            "이야기를 지웁니다(`204`). 담겨 있던 이야기책에서는 빠지지만 책과 다른 이야기는 남습니다. 공유된 글도 함께 내립니다.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/wordbook"): (
+            "단어장",
+            "`summary`(전체·상태별·복습할 때가 된 개수) + `items` + `nextCursor`. `status`(NEW·PRACTICING·FAMILIAR), "
+            "`query`(낱말·뜻 검색), `cursor`·`limit`(기본 20·최대 50). 최근 바뀐 순.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/wordbook/entries"): (
+            "낱말 담기",
+            "대화 메시지(`messageId`)에 실제로 나온 낱말만 담을 수 있습니다(아니면 `400 INVALID_INPUT`). "
+            "뜻풀이는 티키가 만들고, AI 를 못 쓰면 검수 사전이나 '내 말로 적어 보기' 문장으로 이어 갑니다(`source`).\n\n"
+            "이미 담은 낱말이면 `200` 으로 그 낱말을 그대로 돌려줍니다. `Idempotency-Key` 를 보내면 같은 응답을 다시 줍니다.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/wordbook/entries/{entry_id}"): ("낱말 하나", "뜻·예문·내 문장·상태·다음 복습 시각.", _V1L_TOKEN),
+        ("PATCH", "/api/v1/wordbook/entries/{entry_id}"): (
+            "낱말 고치기",
+            "`status`(NEW·PRACTICING·FAMILIAR)를 직접 바꾸거나 `mySentence`(내가 만든 문장)를 적습니다. "
+            "상태를 바꾸면 다음 복습 시각도 함께 옮겨집니다.",
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/wordbook/entries/{entry_id}"): ("낱말 지우기", "단어장에서 지웁니다(`204`).", _V1L_TOKEN),
+        ("POST", "/api/v1/word-quizzes"): (
+            "단어 퀴즈 만들기",
+            "내 단어장에 담긴 낱말로만 냅니다. 복습할 때가 된 낱말이 먼저 나옵니다. `count`(기본 5·최대 10), "
+            "`mode`(`MEANING_TO_WORD`·`WORD_TO_MEANING`·`FILL_IN_BLANK`), `status`(그 상태의 낱말로만).\n\n"
+            "담은 낱말이 없으면 `409 NO_WORDS_TO_QUIZ`. 정답 보기 id 는 응답에 들어 있지 않습니다.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/word-quizzes/{quiz_id}/answers"): (
+            "퀴즈 한 문제 답하기",
+            "문항 하나에 답합니다. 점수를 매기지 않고 낱말 상태와 다음 복습 시각만 바꿉니다(맞히면 한 칸 위, 틀리면 한 칸 아래). "
+            "같은 문항에 다시 답하면 `409 ALREADY_ANSWERED`.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/books"): ("이야기책 목록", "`status`(DRAFT·COMPLETED), `cursor`·`limit`. 최근 바뀐 순.", _V1L_TOKEN),
+        ("POST", "/api/v1/books"): (
+            "이야기책 만들기",
+            "`storyIds` 순서대로 담습니다. `generateIntroduction: true` 면 머리말을 티키가 쓰고, AI 를 못 쓰면 "
+            "담긴 이야기 제목으로 만든 문장을 넣습니다(`introductionSource`). `Idempotency-Key` 를 지원합니다.",
+            _V1L_TOKEN,
+        ),
+        ("GET", "/api/v1/books/{book_id}"): ("이야기책 보기", "책 정보와 담긴 이야기를 순서대로 줍니다.", _V1L_TOKEN),
+        ("PATCH", "/api/v1/books/{book_id}"): (
+            "이야기책 고치기",
+            "`title`·`introduction`·`cover`·`storyIds`(지금 담긴 이야기들의 새 순서). 이야기를 더하고 빼는 것은 전용 엔드포인트로 합니다.\n\n"
+            "`If-Match` 헤더나 본문 `version` 이 필요합니다(다르면 `409 VERSION_CONFLICT`). 완성한 책은 `409 BOOK_COMPLETED`.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/books/{book_id}/stories"): (
+            "책에 이야기 담기",
+            "`position` 을 주면 그 자리에, 없으면 맨 뒤에 담습니다. 이미 담긴 이야기는 `409 STORY_ALREADY_IN_BOOK`.",
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/books/{book_id}/stories/{story_id}"): (
+            "책에서 이야기 빼기",
+            "책에서만 빼냅니다. 이야기는 책장에 그대로 남습니다.",
+            _V1L_TOKEN,
+        ),
+        ("POST", "/api/v1/books/{book_id}/complete"): (
+            "이야기책 완성",
+            "다 만들었다고 표시합니다. 빈 책은 `409 BOOK_EMPTY`. 이미 완성한 책을 다시 불러도 같은 결과를 줍니다.",
+            _V1L_TOKEN,
+        ),
+        ("DELETE", "/api/v1/books/{book_id}"): (
+            "이야기책 지우기",
+            "책만 지웁니다(`204`). 담겨 있던 이야기는 책장에 그대로 남습니다.",
+            _V1L_TOKEN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("PATCH", "/api/v1/stories/{story_id}"): {"title": "차가운 컵에 생긴 물방울", "version": 1},
+        ("POST", "/api/v1/wordbook/entries"): {"word": "수증기", "messageId": "여기에_message_id"},
+        ("PATCH", "/api/v1/wordbook/entries/{entry_id}"): {
+            "status": "PRACTICING",
+            "mySentence": "아침에 유리창에 수증기가 맺혔다.",
+        },
+        ("POST", "/api/v1/word-quizzes"): {"count": 3, "mode": "MEANING_TO_WORD"},
+        ("POST", "/api/v1/word-quizzes/{quiz_id}/answers"): {"questionId": "여기에_question_id", "optionId": "A"},
+        ("POST", "/api/v1/books"): {
+            "title": "나의 과학 이야기책",
+            "storyIds": ["여기에_story_id"],
+            "generateIntroduction": True,
+            "cover": {"theme": "밤하늘", "emoji": "🌙"},
+        },
+        ("PATCH", "/api/v1/books/{book_id}"): {"title": "내가 만든 과학책", "version": 1},
+        ("POST", "/api/v1/books/{book_id}/stories"): {"storyId": "여기에_story_id", "position": 0},
+    }
+)
+# --- end v1 library ---
+
+
+# --- v1 activities ---
+_V1A_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1A_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1A_SCOPE = "아이 프로필 단위로 막혀 있습니다. 다른 프로필의 자료는 `404` 로만 답합니다."
+TAGS.update(
+    {
+        "v1-activities": (
+            "v1-7. 생각 모험 활동",
+            "숲·실험실·마음극장 활동 목록·상세와 활동 세션(시작·복원·자동 저장·단계 이동·완료·취소). "
+            "각 단계의 최소 입력·두 조건 관찰·선택 여부·보호자 확인은 서버가 다시 검사합니다. 완료하면 점수 없이 책장 기록이 하나 생깁니다.",
+        ),
+        "v1-topic-categories": (
+            "v1-8. 주제 카테고리",
+            "기본 카테고리(과학·수학·역사·생각놀이·생활)와 아이가 만든 카테고리. 기본 카테고리는 수정·삭제할 수 없습니다.",
+        ),
+        "v1-admin-topics": (
+            "v1-9. 요일별 주제 운영 (운영자)",
+            "요일·기간별 추천 편성. `ADMIN_KAKAO_IDS` 허용 목록의 계정만 쓸 수 있고, `/home` 추천 순서에만 영향을 줍니다.",
+        ),
+    }
+)
+OPERATIONS.update(
+    {
+        ("GET", "/api/v1/activities"): (
+            "활동 목록·검색",
+            f"`query`(제목·소개·태그), `track`(forest·lab·theater), `area`(영역 이름 일부), `cursor`·`limit`. {_V1A_SCOPE}",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/activities/{activity_id}"): (
+            "활동 소개·단계·시각 자료",
+            "소개(`intro`), 새 단서(`clue`), 단계 이름(`steps`), 대표 질문(`questions`), 시각 자료(`visuals`)를 돌려줍니다. "
+            "`minCharacters` 는 글쓰기 단계에서 공백을 뺀 최소 글자 수입니다.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/activity-sessions"): (
+            "활동 시작",
+            "`Idempotency-Key` 헤더를 넣으면 같은 키로 다시 불러도 처음 세션을 그대로 돌려줍니다. "
+            "마음극장 활동은 `keyword` 로 마음 키워드를 함께 보냅니다(안전하지 않으면 `422 UNSAFE_CONTENT`).",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/activity-sessions/{session_id}"): (
+            "진행 중 초안 복원",
+            f"단계·자동 저장 번호(`revision`)·초안(`draft`)·아직 못 채운 조건(`missing`)을 돌려줍니다. {_V1A_SCOPE}",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/activity-sessions/{session_id}"): (
+            "현재 단계 자동 저장",
+            "`clientRevision` 이 서버의 `revision` 과 같을 때만 저장합니다(다르면 `409 ACTIVITY_REVISION_CONFLICT`). "
+            "`event.type` 은 TEXT·HINT·TOPIC·KEYWORD·LAB_VALUE·OBSERVATION·APPROVE·SCENE·CHOICE·EMOTION·INQUIRY·RUN.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/activity-sessions/{session_id}/advance"): (
+            "다음 단계로 (서버가 조건 재검사)",
+            "최소 입력·두 조건 관찰·선택 여부·보호자 확인을 서버가 다시 봅니다. 못 채웠으면 "
+            "`409 ACTIVITY_STEP_NOT_READY` 와 함께 `details.missing`(조건 코드)·`details.conditions`(안내 문장)를 돌려줍니다.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/activity-sessions/{session_id}/complete"): (
+            "활동 완료 · 책장 기록 만들기",
+            "모든 단계를 마쳤을 때만 완료됩니다. 점수는 만들지 않고 `story_records` 한 줄을 만들어 `/stories` 에 보이게 합니다. "
+            "같은 세션을 다시 완료하면 처음 결과를 그대로 돌려줍니다.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/activity-sessions/{session_id}"): (
+            "진행 중 활동 취소",
+            "초안을 남기고 상태만 `CANCELLED` 로 바꿉니다. 이미 완료한 활동은 `409 SESSION_CLOSED`.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/topic-categories"): (
+            "주제 카테고리 목록",
+            "기본 카테고리(`kind: DEFAULT`, `editable: false`) 뒤에 내가 만든 카테고리(`kind: USER`)가 순서대로 붙습니다. "
+            "기본 5개 + 사용자 20개가 최대라 한 번에 모두 주고 `nextCursor` 는 항상 null 입니다.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/topic-categories"): (
+            "카테고리 추가",
+            "이름은 20자까지, 한 프로필에 20개까지입니다. 기본 카테고리·내 카테고리와 이름이 겹치면 `409 CATEGORY_EXISTS`, "
+            "민감한 이름은 `422 UNSAFE_CATEGORY`.",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/topic-categories/{category_id}"): (
+            "카테고리 이름·순서 수정",
+            "기본 카테고리는 `403 CATEGORY_NOT_EDITABLE`. 다른 프로필의 카테고리는 `404 CATEGORY_NOT_FOUND`.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/topic-categories/{category_id}"): (
+            "카테고리 삭제",
+            "내가 만든 카테고리만 지울 수 있습니다. 기본 카테고리는 `403 CATEGORY_NOT_EDITABLE`.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/admin/topic-schedules"): (
+            "요일·기간별 주제 편성 조회 (운영자)",
+            "`weekday`(0=월 … 6=일), `active`(오늘 적용 여부), `cursor`·`limit`. 허용 목록 밖 계정은 `403 FORBIDDEN`.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/admin/topic-schedules"): (
+            "추천 주제 편성 생성 (운영자)",
+            "`topicId` 는 주제 은행 주제만(`GET /topics` 의 `source: BANK`). `reason` 은 홈에 그대로 보이는 문장입니다. "
+            "`weekday` 를 비우면 기간 내 매일 적용합니다.",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/admin/topic-schedules/{schedule_id}"): (
+            "편성 기간·순서·대상 수정 (운영자)",
+            "`clearWeekday: true` 면 요일 조건을 없애 기간 내 매일로 바꿉니다.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/admin/topic-schedules/{schedule_id}"): (
+            "편성 취소 (운영자)",
+            "편성만 지웁니다. 아이가 그 주제를 고르는 것은 그대로 가능합니다.",
+            _V1A_TOKEN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("POST", "/api/v1/activity-sessions"): {"activityId": "kindness", "keyword": "배려"},
+        ("PATCH", "/api/v1/activity-sessions/{session_id}"): {
+            "clientRevision": 4,
+            "event": {"type": "OBSERVATION", "field": "LOW_LIGHT", "value": "빛이 낮아지니 그림자가 흐려졌어."},
+        },
+        ("POST", "/api/v1/topic-categories"): {"name": "공룡", "order": 0},
+        ("PATCH", "/api/v1/topic-categories/{category_id}"): {"name": "공룡 이야기", "order": 1},
+        ("POST", "/api/v1/admin/topic-schedules"): {
+            "topicId": "topic_ice_cup",
+            "startsOn": "2026-09-14",
+            "endsOn": "2026-09-20",
+            "weekday": 0,
+            "order": 0,
+            "reason": "이번 주 월요일은 물방울 이야기의 날이에요.",
+        },
+        ("PATCH", "/api/v1/admin/topic-schedules/{schedule_id}"): {"order": 1, "clearWeekday": True},
+    }
+)
+# --- end v1 activities ---
+
+
 def install(app: FastAPI) -> None:
     """생성된 스키마에 한국어 이름·설명·예시를 덧붙이는 openapi 함수로 바꾼다."""
 

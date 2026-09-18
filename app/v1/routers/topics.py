@@ -11,7 +11,7 @@ from ...models import SafetyEvent
 from ...safety import pii
 from ...safety import topics as sensitive
 from ...talks.planner import clip
-from .. import ai_gate, cursor, idempotency, topic_catalog
+from .. import activity_schedules, ai_gate, cursor, idempotency, topic_catalog
 from ..deps import CurrentUser, require_user
 from ..errors import ApiError
 from ..models_conversation import UserTopic
@@ -45,8 +45,8 @@ def _item(snapshot: dict) -> TopicItem:
 
 @router.get("", response_model=TopicList)
 def list_topics(
-    category: TopicCategory | None = Query(default=None),
-    recommended: bool | None = Query(default=None, description="true 면 오늘의 추천 주제만"),
+    category: TopicCategory | None = Query(default=None, description="기본 카테고리 id(`GET /topic-categories`)"),
+    recommended: bool | None = Query(default=None, description="true 면 오늘의 추천 주제만(운영자 편성 순서를 따른다)"),
     query: str | None = Query(default=None, max_length=40),
     cursor_raw: str | None = Query(default=None, alias="cursor"),
     limit: int | None = Query(default=None),
@@ -57,8 +57,12 @@ def list_topics(
     offset = cursor.decode_offset(cursor_raw)
     topics = topic_catalog.all_topics(db, cu.id)
     if recommended:
-        picked = {snap["apiId"] for snap, _ in topic_catalog.recommend(db, cu.id, completed_profile(db, cu.user))}
-        topics = [t for t in topics if t["apiId"] in picked]
+        picks = activity_schedules.reorder(
+            db, topic_catalog.recommend(db, cu.id, completed_profile(db, cu.user)), cu.id
+        )
+        order = [snap["apiId"] for snap, _ in picks]
+        by_id = {t["apiId"]: t for t in topics}
+        topics = [by_id[tid] for tid in order if tid in by_id]
     if category:
         topics = [t for t in topics if t["apiCategory"] == category]
     if query and query.strip():
