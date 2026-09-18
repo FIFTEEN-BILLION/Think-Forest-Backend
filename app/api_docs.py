@@ -668,6 +668,187 @@ EXAMPLES.update(
     }
 )
 # --- end v1 conversation ---
+# --- v1 social ---
+_V1S_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1S_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1S_ADMIN = "운영자 JJCP access token `jat_…`"
+AUTH_HELP[_V1S_ADMIN] = "운영자 JJCP access token. 카카오 회원번호가 `ADMIN_KAKAO_IDS` 허용 목록에 있어야 합니다(아니면 403 FORBIDDEN)."
+TAGS.update(
+    {
+        "v1-sharing": (
+            "v1-7. 이야기 공유·보호자 승인",
+            "아이가 공유를 요청하면 보호자가 내용을 읽고 **본문 버전**을 확인해 승인합니다. "
+            "`DRAFT → PENDING_GUARDIAN → APPROVED → PUBLISHED`, 반려는 `REJECTED`, 승인 전 취소는 `CANCELLED`, 승인 뒤 중단은 `REVOKED`. "
+            "승인 뒤 아이가 본문을 고치면 공개본은 그대로 둔 채 공개를 멈추고(`PAUSED`) 다시 승인 대기로 돌아갑니다.",
+        ),
+        "v1-community": (
+            "v1-8. 친구들의 이야기",
+            "보호자가 승인한 공개본만 보입니다. 작성자의 실제 이름·학교·정확한 나이는 어떤 응답에도 없습니다(별명과 넓은 나이대만). "
+            "추천은 한 사람이 한 이야기에 한 번. 신고가 기준을 넘거나 개인정보 신고가 들어오면 자동으로 숨기고 운영자 검토로 보냅니다.",
+        ),
+        "v1-reports": (
+            "v1-9. 나의 발자국·성장 리포트·보호자 상담",
+            "대화에서 **관찰된 횟수**만 보여 줍니다. 점수·등급·발달 진단이 아닙니다. "
+            "서술형 요약과 월간 상담은 OpenAI 로 만들고, 막히거나 실패하면 규칙 기반 문장으로 대신합니다.",
+        ),
+        "v1-admin": (
+            "v1-10. 안전과 운영",
+            "보호자에게는 사건 종류와 안내만 드리고 아이 원문은 주지 않습니다. 운영자 API 는 허용 목록 계정만 부를 수 있습니다.",
+        ),
+    }
+)
+OPERATIONS.update(
+    {
+        ("POST", "/api/v1/stories/{story_id}/share-requests"): (
+            "공유 요청 보내기 (아이)",
+            "내 이야기를 보호자에게 확인 요청합니다. `audience` 는 `PEERS`(또래)·`FAMILY`(가족)·`INVITED`(초대한 사람). "
+            "`hideProfile: true` 면 별명도 감추고 `친구` 로만 보입니다.\n\n"
+            "이미 진행 중인 요청이 있으면 `409 SHARE_ALREADY_REQUESTED`, 민감한 표현이 있으면 `422 UNSAFE_CONTENT`. "
+            "`Idempotency-Key` 를 보내면 같은 응답을 다시 줍니다.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/share-requests/{request_id}"): (
+            "공유 요청·공개 상태 보기",
+            "요청 상태와 (공개됐다면) 공개본을 함께 줍니다. 다른 계정의 요청은 `404 SHARE_REQUEST_NOT_FOUND`.",
+            _V1S_TOKEN,
+        ),
+        ("DELETE", "/api/v1/share-requests/{request_id}"): (
+            "공유 요청 취소 (승인 전만)",
+            "`PENDING_GUARDIAN` 일 때만 됩니다. 승인 뒤에는 `409 SHARE_NOT_CANCELLABLE` — 보호자의 공개 중단(revoke)을 쓰세요.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/guardian/share-requests"): (
+            "승인 대기 목록 (보호자)",
+            "기본은 `PENDING_GUARDIAN`. `status=APPROVED,PUBLISHED` 처럼 쉼표로 여러 개, `status=ALL` 이면 전부. `cursor`·`limit`.",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian/share-requests/{request_id}/approve"): (
+            "공유 승인 (보호자)",
+            "읽은 본문의 `confirmedBodyVersion` 을 함께 보냅니다. 지금 본문 버전과 다르면 `409 SHARE_VERSION_MISMATCH` "
+            "(`details` 에 지금 버전을 담습니다). 승인하면 그 버전의 **스냅숏**이 공개본이 됩니다.",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian/share-requests/{request_id}/reject"): (
+            "공유 반려 (보호자)",
+            "`reason` 을 아이에게 전달합니다. 승인 대기 상태가 아니면 `409 SHARE_NOT_PENDING`.",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian/share-requests/{request_id}/revoke"): (
+            "공개 중단 (보호자)",
+            "이미 공개된 이야기를 내립니다. 공개 전이면 `409 SHARE_NOT_PUBLISHED`.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/community/stories"): (
+            "친구들의 이야기 목록",
+            "승인·공개된 이야기만 최근 공개순으로 줍니다. `category`, `recommendation`(`SIMILAR_AGE`·`SAME_CATEGORY`·`POPULAR`·`NEW`), `cursor`·`limit`.\n\n"
+            "응답의 `author` 는 별명과 넓은 나이대뿐이고, `recommendationReason` 에 이 이야기가 보이는 까닭이 한 문장으로 들어갑니다.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/community/stories/{public_story_id}"): (
+            "친구 이야기 한 편",
+            "본문과 생각 과정까지 줍니다. 숨겨졌거나 없는 이야기는 똑같이 `404 PUBLIC_STORY_NOT_FOUND`.",
+            _V1S_TOKEN,
+        ),
+        ("PUT", "/api/v1/community/stories/{public_story_id}/recommendation"): (
+            "따뜻한 추천 남기기",
+            "한 사람은 한 이야기에 한 번만 남길 수 있습니다. 여러 번 불러도 수가 올라가지 않습니다.",
+            _V1S_TOKEN,
+        ),
+        ("DELETE", "/api/v1/community/stories/{public_story_id}/recommendation"): (
+            "추천 취소",
+            "남긴 적이 없어도 오류가 아닙니다(여러 번 불러도 결과가 같습니다).",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/community/stories/{public_story_id}/reports"): (
+            "불편한 내용 신고",
+            "`reason` 은 `UNCOMFORTABLE_CONTENT`·`SCARY`·`PERSONAL_INFO`·`COPIED`·`MEAN_WORDS`·`OTHER`. "
+            "신고가 기준 수에 닿거나 개인정보 신고가 들어오면 공개본을 바로 숨기고 운영자 검토 대기로 보냅니다(`storyStatus: HIDDEN`).",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/reports/progress"): (
+            "나의 발자국 (기간별 활동)",
+            "`period` 는 `7d`·`30d`·`90d`(기본 30d), `profileId` 는 내 프로필만. 활동 일수·완성한 이야기·관찰된 표현 횟수와 날짜별 `timeline`, 분야별 `categoryBreakdown` 을 줍니다.\n\n"
+            "**점수도 진단도 아닙니다.** `notice` 문장을 화면에 그대로 보여 주세요.",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/reports/summaries"): (
+            "기간 요약 만들기",
+            "`from`·`to`(KST 날짜, 비우면 최근 7일)의 서술형 요약을 만듭니다. 같은 기간이고 원본 기록이 그대로면 새로 만들지 않고 기존 결과를 줍니다(`reused: true`). "
+            "원본 이야기가 늘거나 바뀌면 이전 요약은 `STALE` 이 됩니다.\n\n"
+            "`source` 가 `ai` 면 OpenAI 문장, `fallback` 이면 규칙 기반 문장입니다.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/reports/summaries/{summary_id}"): (
+            "요약 한 건 보기",
+            "볼 때마다 원본 기록과 견줘 `status` 를 갱신합니다(달라졌으면 `STALE`). 다른 계정 요약은 `404 SUMMARY_NOT_FOUND`.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/guardian/consultations/eligibility"): (
+            "월간 상담 가능 여부",
+            "`period`(YYYY-MM, 비우면 지난달) 기준으로 이용 기간·자료 충분성·이미 만들었는지를 알려 줍니다. `reason` 에 까닭이 한 문장으로 들어갑니다.",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian/consultations"): (
+            "월간 상담 만들기",
+            "한 달에 한 번입니다. 조건이 안 되면 `409 CONSULTATION_NOT_ELIGIBLE`(`details.daysRemaining`·`completedStories`). "
+            "이미 만든 달이면 그 상담을 그대로 돌려줍니다.\n\n"
+            "관찰된 행동·대표 사례·함께 해 볼 질문과 **근거가 된 이야기 id**(`evidenceStoryIds`)를 줍니다. 진단 표현은 쓰지 않습니다.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/guardian/consultations"): ("월간 상담 목록", "최근순. `cursor`·`limit`.", _V1S_TOKEN),
+        ("GET", "/api/v1/guardian/consultations/{consultation_id}"): (
+            "월간 상담 한 건",
+            "상담 내용과 근거 이야기 id, 그동안 남긴 후속 질문·답을 함께 줍니다.",
+            _V1S_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian/consultations/{consultation_id}/questions"): (
+            "상담 후속 질문",
+            "상담 기록에 있는 관찰만 근거로 답합니다. AI 를 쓸 수 없으면 정해진 안내 문장으로 답합니다(`source: fallback`).",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/guardian/safety-events"): (
+            "안전 이벤트 (보호자)",
+            "감지된 **종류와 안내 문구만** 드립니다. 아이가 쓴 문장은 담지 않습니다. `needsAttention: true` 는 오늘 안에 살펴봐 주시면 좋은 건입니다.",
+            _V1S_TOKEN,
+        ),
+        ("GET", "/api/v1/admin/community/reports"): (
+            "신고 검토 목록 (운영자)",
+            "`status` 는 `OPEN`(기본)·`RESOLVED`·`ALL`. 허용 목록에 없는 계정은 `403 FORBIDDEN`.",
+            _V1S_ADMIN,
+        ),
+        ("POST", "/api/v1/admin/community/reports/{report_id}/resolve"): (
+            "신고 처리 (운영자)",
+            "`KEEP` 은 다시 공개, `HIDE` 는 숨김, `DELETE` 는 공개본 내용을 지웁니다. **아이의 원본 이야기는 어떤 경우에도 지우지 않습니다.**",
+            _V1S_ADMIN,
+        ),
+        ("GET", "/api/v1/admin/safety-events"): (
+            "고위험 이벤트 검토 (운영자)",
+            "`escalatedOnly=false` 를 보내면 전체를 봅니다. 여기에도 아이 원문은 없습니다.",
+            _V1S_ADMIN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("POST", "/api/v1/stories/{story_id}/share-requests"): {"audience": "PEERS", "hideProfile": True},
+        ("POST", "/api/v1/guardian/share-requests/{request_id}/approve"): {
+            "confirmedBodyVersion": 1,
+            "confirmedRedactions": True,
+        },
+        ("POST", "/api/v1/guardian/share-requests/{request_id}/reject"): {"reason": "조금 더 다듬은 뒤에 보여 주자."},
+        ("POST", "/api/v1/guardian/share-requests/{request_id}/revoke"): {"reason": "당분간 비공개로 둘게요."},
+        ("POST", "/api/v1/community/stories/{public_story_id}/reports"): {
+            "reason": "UNCOMFORTABLE_CONTENT",
+            "detail": "무서운 표현이 있어요.",
+        },
+        ("POST", "/api/v1/reports/summaries"): {"from": "2026-09-11", "to": "2026-09-17"},
+        ("POST", "/api/v1/guardian/consultations"): {"period": "2026-08"},
+        ("POST", "/api/v1/guardian/consultations/{consultation_id}/questions"): {
+            "question": "아이가 이유를 말할 때 어떻게 도와주면 좋을까요?"
+        },
+    }
+)
+# --- end v1 social ---
 
 
 # --- v1 library ---

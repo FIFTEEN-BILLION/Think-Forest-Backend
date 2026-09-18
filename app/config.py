@@ -61,6 +61,15 @@ class Settings(BaseModel):
     # refresh 쿠키 Secure 속성. http 로컬 개발에서만 false.
     auth_cookie_secure: bool = True
     # --- /v1 auth ---
+    # --- v1 social ---
+    # 운영자 허용 목록 — 카카오 회원번호를 쉼표로 (ADMIN_KAKAO_IDS=12345,67890). 비어 있으면 운영자가 없다.
+    # 친구 이야기 신고가 이 수에 닿으면 공개본을 자동으로 숨기고 운영자 검토 대기로 보낸다.
+    community_report_hide_threshold: int = 3
+    # 보호자 월간 상담: 첫 기록 뒤 이 일수가 지나야 만들 수 있다(그리고 한 달에 한 번).
+    consultation_min_days: int = 30
+    # 성장 리포트 요약을 만들려면 기간 안에 이야기가 최소 이만큼 있어야 한다.
+    report_summary_min_stories: int = 1
+    # --- end v1 social ---
     # --- v1 activities ---
     # 운영자 허용 목록(`/admin/topic-schedules`). 카카오 회원번호를 쉼표로 나눠 적는다.
     # B3 트랙도 같은 키를 쓴다 — 이름을 바꾸지 말 것(ADMIN_KAKAO_IDS).
@@ -138,6 +147,11 @@ def get_settings() -> Settings:
         auth_dev_login=_flag(os.getenv("AUTH_DEV_LOGIN"), default=False),
         auth_cookie_secure=_flag(os.getenv("AUTH_COOKIE_SECURE")),
         # --- /v1 auth ---
+        # --- v1 social ---
+        community_report_hide_threshold=int(os.getenv("COMMUNITY_REPORT_HIDE_THRESHOLD") or 3),
+        consultation_min_days=int(os.getenv("CONSULTATION_MIN_DAYS") or 30),
+        report_summary_min_stories=int(os.getenv("REPORT_SUMMARY_MIN_STORIES") or 1),
+        # --- end v1 social ---
         # --- v1 activities ---
         admin_kakao_ids=tuple(i.strip() for i in (os.getenv("ADMIN_KAKAO_IDS") or "").split(",") if i.strip()),
         # --- /v1 activities ---
