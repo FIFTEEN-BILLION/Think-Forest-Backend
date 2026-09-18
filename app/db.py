@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -28,14 +28,21 @@ _factory: sessionmaker[Session] | None = None
 
 def configure(url: str | None = None) -> Engine:
     global _engine, _factory
-    url = url or get_settings().database_url
+    url = (url or "").strip() or get_settings().database_url
+    parsed = make_url(url)
+    if parsed.get_backend_name() == "sqlite" and parsed.database not in (None, "", ":memory:"):
+        path = Path(parsed.database)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / path
+        path = path.resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        parsed = parsed.set(database=str(path))
+    url = parsed.render_as_string(hide_password=False)
     kwargs: dict[str, Any] = {}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
-        if url in ("sqlite://", "sqlite:///:memory:"):
+        if parsed.database in (None, "", ":memory:"):
             kwargs["poolclass"] = StaticPool
-        else:
-            Path(url.split("///", 1)[-1]).parent.mkdir(parents=True, exist_ok=True)
     else:
         # Supabase 등 원격 Postgres — 서버리스 콜드 스타트 사이 끊긴 커넥션을 재사용하지 않도록 확인 후 사용
         kwargs["pool_pre_ping"] = True
@@ -50,6 +57,7 @@ def engine() -> Engine:
 
 def init_db() -> None:
     from . import models  # noqa: F401 — 테이블 등록
+    from .v1 import tables  # noqa: F401 — v1 테이블 등록
 
     Base.metadata.create_all(engine())
 

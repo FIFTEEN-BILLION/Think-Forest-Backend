@@ -55,7 +55,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload
 ```
 
 - API 문서: <http://127.0.0.1:8010/docs> — 8000번 포트가 비어 있으면 `--port 8000` 도 됩니다.
-- 로컬 DB: 처음 실행하면 `./data/thinkforest.db`(SQLite)가 생깁니다. Git 에는 올라가지 않습니다.
+- 로컬 DB: `DATABASE_URL`을 비우거나 공백으로 두면 `backend/data/thinkforest.db`(SQLite)를 사용합니다. 상대 SQLite 경로는 실행 위치와 관계없이 백엔드 폴더를 기준으로 해석합니다. Git 에는 올라가지 않습니다. 기존 로컬 구현의 DB를 사용한다면 [develop 통합 기록과 이관 필요 사항](./INTEGRATION_NOTES.md)을 먼저 확인합니다.
 - 검사: `ruff check . && pytest`
 
 > Python 3.10 이상에서 동작합니다(CI 는 3.11).
@@ -151,6 +151,24 @@ CORS_ORIGINS="http://172.30.1.66:5173" uvicorn app.main:app --host 0.0.0.0 --por
 4. `https://<프로젝트>.vercel.app/health`, `/docs` 로 확인한다.
 
 로컬에서 Supabase 를 테스트하려면 `DATABASE_URL` 을 같은 pooler 주소로 바꿔서 실행하면 된다(SQLite 와 동일하게 `init_db()` 가 테이블을 만든다). 마이그레이션 도구(Alembic)는 아직 없다.
+
+### 음성 스트리밍(WebSocket)은 따로 올린다 — Render / Fly.io
+
+`WS /api/v1/speech/stream` 은 말하는 동안 연결을 붙잡고 있어야 한다. **Vercel 서버리스 함수는 요청이 끝나면 죽기 때문에 이 연결을 유지하지 못한다.** 그래서 같은 코드를 상주 서버에 한 벌 더 올리고, 프론트는 실시간 음성만 그 주소로 붙는다.
+
+| 파일 | 대상 | 실행 |
+|---|---|---|
+| `render.yaml` | Render Web Service | `uvicorn app.main:app --ws websockets --proxy-headers` |
+| `fly.toml` | Fly.io Machines | 같은 명령, `auto_stop_machines = false` |
+
+1. 두 파일 중 하나를 골라 서비스를 만든다. 비밀값은 파일에 적지 않는다 — Render 는 `sync: false` 항목을 대시보드에서, Fly 는 `fly secrets set` 으로 넣는다.
+2. `PUBLIC_WS_BASE_URL` 에 그 서비스의 주소(`wss://…`)를 넣는다. 비워 두면 서버가 요청 주소에서 `ws/wss` 를 유도한다.
+3. 상태 확인은 `/health`, 실제 확인은 `POST /api/v1/speech/stream-tickets` → 받은 `webSocketUrl` 로 접속.
+4. **Vercel 쪽 배포에는 `WEBSOCKET_ENABLED=false`** 를 넣는다. 그러면 접속권 발급이 `503 STREAMING_UNAVAILABLE` 로 떨어지고, 응답의 `details.fallback` 이 알려 주는 `POST /api/v1/speech/transcriptions`(녹음 파일 한 번 재시도)로 화면이 내려간다. 음성이 아예 막히지는 않는다.
+
+음성 조각은 메모리 버퍼에서만 다루고 파일로 저장하지 않는다. 음성 원문·중간 자막·접속 ticket 은 로그에 남기지 않는다.
+
+삭제·탈퇴 요청은 유예기간이 지나야 실제로 지운다. 배치 워커가 아직 없어서 내 데이터 API 를 부를 때 기한이 지난 요청을 함께 처리한다(`app/v1/ops_data.py` 의 `run_due`). 워커를 붙이면 이 함수를 주기적으로 부르면 된다.
 
 ---
 

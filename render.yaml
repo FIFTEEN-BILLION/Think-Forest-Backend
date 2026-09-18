@@ -1,0 +1,57 @@
+# Render 배포 — 음성 스트리밍 WebSocket(`/api/v1/speech/stream`)을 여는 상주 서버.
+#
+# Vercel 서버리스 함수는 요청이 끝나면 죽기 때문에 WebSocket 연결을 붙잡고 있지 못한다.
+# 그래서 같은 코드를 Render(또는 fly.toml 로 Fly.io)에 한 벌 더 올리고, 프론트는 실시간 음성만 이쪽으로 붙는다.
+# WebSocket 을 열 수 없는 배포에서는 WEBSOCKET_ENABLED=false 로 두면 접속권 발급이 503 STREAMING_UNAVAILABLE 로
+# 떨어지고 프론트는 `/speech/transcriptions`(녹음 파일) 경로로 내려간다.
+#
+# 비밀값은 이 파일에 적지 않는다. `sync: false` 는 Render 대시보드에서 직접 넣으라는 뜻이다.
+services:
+  - type: web
+    name: think-forest-backend-ws
+    runtime: python
+    plan: starter # 무료 플랜은 잠들어서 WebSocket 이 끊긴다
+    region: singapore
+    branch: main
+    healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    # --ws websockets: uvicorn 이 WebSocket 프로토콜을 켜도록 명시한다.
+    # --proxy-headers: Render 프록시 뒤에서 https/wss 원본 주소를 알아보게 한다.
+    startCommand: >-
+      uvicorn app.main:app --host 0.0.0.0 --port $PORT
+      --ws websockets --proxy-headers --forwarded-allow-ips '*'
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: WEBSOCKET_ENABLED
+        value: "true"
+      # 프론트에 내려줄 WebSocket 주소. 비우면 요청 주소에서 ws/wss 를 유도한다.
+      - key: PUBLIC_WS_BASE_URL
+        value: wss://think-forest-backend-ws.onrender.com
+      - key: CORS_ORIGINS
+        sync: false # 배포된 프론트 도메인. `*` 금지
+      - key: DATABASE_URL
+        sync: false # Supabase Connection Pooler (postgresql+psycopg://)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TYPECAST_API_KEY
+        sync: false
+      - key: TYPECAST_VOICE_ID
+        sync: false
+      - key: KAKAO_REST_API_KEY
+        sync: false
+      - key: KAKAO_CLIENT_SECRET
+        sync: false
+      - key: KAKAO_REDIRECT_URI
+        sync: false
+      - key: KAKAO_APP_ID
+        sync: false
+      # 푸시(Expo). 비우면 앱 내 알림만 기록하고 푸시는 보내지 않는다.
+      - key: EXPO_PUSH_URL
+        sync: false
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
+      - key: CHILD_DATA_MODE
+        value: demo # ZDR 승인 뒤에만 child 로 바꾼다

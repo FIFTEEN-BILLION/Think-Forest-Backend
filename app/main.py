@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import api_docs
+from . import api_docs, v1
 from .config import get_settings
 from .db import init_db
 from .routers import (
@@ -30,6 +30,7 @@ from .routers import (
     theater,
     voice,
 )
+from .v1 import errors as v1_errors
 
 settings = get_settings()
 
@@ -52,9 +53,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[*settings.cors_origins, "https://think-kids.netlify.app"],
     allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.netlify\.app",
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
-    allow_headers=["Content-Type", "Accept", "Authorization"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "Accept", "Authorization", "Idempotency-Key", "If-Match", "X-Request-Id"],
+    expose_headers=["X-Request-Id"],
 )
+v1_errors.install(app)
 
 app.include_router(diagnostic.router)
 app.include_router(rubric.router)
@@ -74,6 +77,8 @@ app.include_router(shares.router)
 app.include_router(progress.router)
 app.include_router(speech.router)
 app.include_router(voice.router)
+# JJCP API v1 (카카오 로그인·첫인사·이야기)
+app.include_router(v1.router)
 
 # /docs 에 한국어 설명·순서·예시를 붙인다.
 api_docs.install(app)

@@ -1,0 +1,41 @@
+# Fly.io 배포 — render.yaml 의 대안. 음성 스트리밍 WebSocket 을 여는 상주 서버다.
+#
+# 배포:
+#   fly launch --no-deploy --copy-config       # 이 파일을 그대로 쓴다
+#   fly secrets set OPENAI_API_KEY=… DATABASE_URL=… TYPECAST_API_KEY=… …   # 비밀값은 여기 적지 않는다
+#   fly deploy
+app = "think-forest-backend-ws"
+primary_region = "nrt"
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+
+[processes]
+  # --ws websockets 로 WebSocket 프로토콜을 켜고, --proxy-headers 로 Fly 프록시 뒤의 wss 원본을 알아본다.
+  app = "uvicorn app.main:app --host 0.0.0.0 --port 8080 --ws websockets --proxy-headers --forwarded-allow-ips '*'"
+
+[env]
+  PORT = "8080"
+  WEBSOCKET_ENABLED = "true"
+  PUBLIC_WS_BASE_URL = "wss://think-forest-backend-ws.fly.dev"
+  CHILD_DATA_MODE = "demo"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 말하는 도중 기계가 잠들면 WebSocket 이 끊긴다. 항상 한 대는 켜 둔다.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[http_service.checks]]
+  method = "GET"
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
