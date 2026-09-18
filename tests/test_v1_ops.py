@@ -579,3 +579,34 @@ def test_ops_endpoints_need_a_token(client):
     ):
         res = anonymous.request(method, path, json={})
         assert res.status_code == 401 and res.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_voice_consent_from_consent_api_opens_speech(client, frozen):
+    """예전 권한이 없어도 보호자가 음성 동의를 남기면 음성 API 가 열린다(명세 26절)."""
+    from app.v1 import models_accounts
+
+    session = next(db.get_session())
+    account = create_account(session, is_tester=True, nickname="달")
+    headers = auth(issue_access_token(session, account))
+    session.commit()
+
+    blocked = client.post("/api/v1/speech/stream-tickets", json={"locale": "ko-KR"}, headers=headers)
+    assert blocked.status_code == 403 and blocked.json()["error"]["code"] == "CONSENT_REQUIRED"
+    assert blocked.json()["error"]["details"]["documentIds"] == ["voice_retention"]
+
+    created = client.post("/api/v1/profiles", json={"nickname": "달"}, headers=headers)
+    assert created.status_code == 201
+    profile_id = created.json()["profile"]["id"]
+    document = models_accounts.DOCUMENT_BY_ID["voice_retention"]
+    granted = client.post(
+        "/api/v1/consents",
+        json={
+            "profileId": profile_id,
+            "items": [{"documentId": document.id, "version": document.version, "agreed": True}],
+            "actor": "GUARDIAN",
+        },
+        headers=headers,
+    )
+    assert granted.status_code == 201
+    opened = client.post("/api/v1/speech/stream-tickets", json={"locale": "ko-KR"}, headers=headers)
+    assert opened.status_code == 201 and opened.json()["ticket"]

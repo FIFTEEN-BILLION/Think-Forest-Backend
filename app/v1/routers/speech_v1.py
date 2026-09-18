@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFi
 from fastapi.concurrency import run_in_threadpool
 from pydantic import Field
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ... import clock
 from ...config import get_settings
@@ -28,7 +28,7 @@ from ...safety.blocklist import find_blocked
 from ...schemas.common import CamelModel
 from ...services import speech as speech_service
 from ...services import tts, usage
-from .. import cursor, speech_engine, speech_tickets
+from .. import cursor, models_accounts, speech_engine, speech_tickets
 from ..deps import CurrentUser, require_user
 from ..errors import ApiError
 from ..models import User
@@ -84,14 +84,30 @@ class SynthesisRequest(CamelModel):
 # ---------------------------------------------------------------- 공통 확인
 
 
+def _has_voice_consent(child: Child) -> bool:
+    """보호자가 음성 보관 동의(`voice_retention`)를 남겼는지. 동의 API(26절)가 권한의 근거다."""
+    db = object_session(child)
+    if db is None:
+        return False
+    with db.no_autoflush:
+        profile = db.scalar(select(ChildProfile).where(ChildProfile.child_id == child.id))
+        if profile is None:
+            return False
+        consent = models_accounts.active_consent(db, profile.id, "voice_retention")
+    return consent is not None and consent.actor_role == "GUARDIAN"
+
+
 def _require_voice(child: Child) -> None:
-    """보호자의 음성 동의(권한)가 있어야 한다. 명세 26절: 없으면 403 CONSENT_REQUIRED."""
-    if not (child.permissions or {}).get("voice"):
+    """보호자의 음성 동의가 있어야 한다. 명세 26절: 없으면 403 CONSENT_REQUIRED.
+
+    동의 API 의 `voice_retention` 동의나, 예전 방식인 아이 권한(`permissions.voice`) 중 하나면 된다.
+    """
+    if not ((child.permissions or {}).get("voice") or _has_voice_consent(child)):
         raise ApiError(
             403,
             "CONSENT_REQUIRED",
             "보호자가 음성 사용을 허락해야 들을 수 있어요.",
-            {"permission": "voice", "documentIds": ["voice_input"]},
+            {"permission": "voice", "documentIds": ["voice_retention"]},
         )
 
 
