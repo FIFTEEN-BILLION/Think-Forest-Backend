@@ -61,6 +61,11 @@ class Settings(BaseModel):
     # refresh 쿠키 Secure 속성. http 로컬 개발에서만 false.
     auth_cookie_secure: bool = True
     # --- /v1 auth ---
+    # --- v1 activities ---
+    # 운영자 허용 목록(`/admin/topic-schedules`). 카카오 회원번호를 쉼표로 나눠 적는다.
+    # B3 트랙도 같은 키를 쓴다 — 이름을 바꾸지 말 것(ADMIN_KAKAO_IDS).
+    admin_kakao_ids: tuple[str, ...] = ()
+    # --- /v1 activities ---
 
     @property
     def ai_enabled(self) -> bool:
@@ -121,6 +126,9 @@ def get_settings() -> Settings:
         auth_dev_login=_flag(os.getenv("AUTH_DEV_LOGIN"), default=False),
         auth_cookie_secure=_flag(os.getenv("AUTH_COOKIE_SECURE")),
         # --- /v1 auth ---
+        # --- v1 activities ---
+        admin_kakao_ids=tuple(i.strip() for i in (os.getenv("ADMIN_KAKAO_IDS") or "").split(",") if i.strip()),
+        # --- /v1 activities ---
     )
 
 
