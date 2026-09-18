@@ -32,6 +32,7 @@ from ..accounts import ACCESS_TTL_SECONDS, create_account, issue_access_token
 from ..deps import CurrentUser, require_user
 from ..errors import ApiError, error_body
 from ..models import AccessToken, User
+from ..models_accounts import LoginIdempotency
 from ..models_auth import AuthIdentity, OAuthState, RefreshSession
 
 router = APIRouter(prefix="/auth", tags=["v1-auth"])
@@ -40,6 +41,8 @@ REFRESH_TTL_SECONDS = 30 * 24 * 3600
 STATE_TTL_SECONDS = 600
 # 여러 탭·React StrictMode 가 같은 쿠키로 거의 동시에 갱신하는 경우. 이 안의 재사용은 401 만 주고 계열은 살린다.
 REUSE_GRACE_SECONDS = 30
+# 모바일 로그인 재시도용 `Idempotency-Key` 유효 시간. 이 안의 재시도는 새 refresh 계열을 만들지 않는다.
+LOGIN_IDEMPOTENCY_TTL_SECONDS = 600
 COOKIE_NAME = "jjcp_refresh"
 COOKIE_PATH = "/api/v1/auth"
 
@@ -171,7 +174,12 @@ def kakao_callback(
 
 
 @router.post("/kakao/mobile", response_model=TokenResponse, response_model_exclude_none=True)
-def kakao_mobile(req: MobileLoginRequest, db: Session = Depends(get_session)) -> TokenResponse:
+def kakao_mobile(
+    req: MobileLoginRequest,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_session),
+) -> TokenResponse:
     settings = get_settings()
     if not settings.kakao_rest_api_key:
         raise _provider_unavailable()
@@ -190,10 +198,12 @@ def kakao_mobile(req: MobileLoginRequest, db: Session = Depends(get_session)) ->
     user = _find_or_create_user(db, "KAKAO", kakao_user_id)
     if user is None:
         raise ApiError(401, "UNAUTHORIZED", "다시 로그인해 주세요.")
-    refresh_raw, chain_id = _start_session(db, user, platform=req.platform)
+    refresh_raw, chain_id, replayed = _login_session(db, user, idempotency_key, platform=req.platform)
     access = issue_access_token(db, user, refresh_session_id=chain_id)
     body = _token_response(db, user, access, refresh_raw)
     db.commit()
+    if replayed:
+        response.headers["Idempotent-Replayed"] = "true"
     return body
 
 
@@ -339,6 +349,39 @@ def _login_error(settings: Settings, return_to: str, code: str) -> RedirectRespo
     return RedirectResponse(f"{settings.frontend_base_url}{target}", status_code=302)
 
 
+def _login_session(db: Session, user: User, key: str | None, *, platform: str) -> tuple[str, str, bool]:
+    """`Idempotency-Key` 가 있으면 같은 키의 재시도는 refresh 계열을 새로 만들지 않고 쓰던 계열을 이어 쓴다.
+
+    토큰 원문과 응답 본문은 저장하지 않는다(계열 id 만 둔다). access·refresh 토큰은 재시도마다 새로 발급한다.
+    """
+    key = (key or "").strip()
+    if not key:
+        return (*_start_session(db, user, platform=platform), False)
+    if len(key) > 128:
+        raise ApiError(400, "INVALID_INPUT", "입력 형식을 확인해 주세요.", {"fields": ["Idempotency-Key"]})
+    now = clock.now()
+    record = db.scalar(
+        select(LoginIdempotency).where(LoginIdempotency.user_id == user.id, LoginIdempotency.key == key)
+    )
+    if record is not None and record.expires_at > now:
+        return _new_refresh(db, user, chain_id=record.chain_id, platform=platform), record.chain_id, True
+    refresh_raw, chain_id = _start_session(db, user, platform=platform)
+    if record is None:
+        db.add(
+            LoginIdempotency(
+                user_id=user.id,
+                key=key,
+                chain_id=chain_id,
+                expires_at=now + timedelta(seconds=LOGIN_IDEMPOTENCY_TTL_SECONDS),
+            )
+        )
+    else:
+        record.chain_id = chain_id
+        record.expires_at = now + timedelta(seconds=LOGIN_IDEMPOTENCY_TTL_SECONDS)
+    db.flush()
+    return refresh_raw, chain_id, False
+
+
 def _find_or_create_user(
     db: Session, provider: str, provider_user_id: str, *, is_tester: bool = False, nickname: str = ""
 ) -> User | None:
@@ -346,7 +389,8 @@ def _find_or_create_user(
         select(AuthIdentity).where(AuthIdentity.provider == provider, AuthIdentity.provider_user_id == provider_user_id)
     )
     if identity is None:
-        user = create_account(db, is_tester=is_tester, nickname=nickname)
+        # 로그인 계정은 보호자·가족 계정이다. 아이 프로필은 이 계정 아래에 여러 개 붙는다.
+        user = create_account(db, role="GUARDIAN", is_tester=is_tester, nickname=nickname)
         db.add(AuthIdentity(user_id=user.id, provider=provider, provider_user_id=provider_user_id))
         db.flush()
         return user

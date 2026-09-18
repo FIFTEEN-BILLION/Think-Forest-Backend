@@ -10,16 +10,16 @@ from sqlalchemy.orm import Session
 
 from ... import clock
 from ...db import get_session
-from .. import activity_home, activity_schedules, topic_catalog
+from .. import activity_home, activity_schedules, models_accounts, topic_catalog
 from ..cursor import iso
 from ..deps import CurrentUser, require_user
-from ..models_conversation import ConversationMessage, ConversationSession, StoryRecord
+from ..models_conversation import ChildProfile, ConversationMessage, ConversationSession, StoryRecord
 from ..profile_status import completed_profile
+from ..schemas_accounts import AccountMeResponse, MeProfileItem
 from ..schemas_conversation import (
     HomeProfile,
     HomeResponse,
     MeProfile,
-    MeResponse,
     MeUser,
     Recommendation,
     ResumeOut,
@@ -36,10 +36,34 @@ def _week_start_utc() -> datetime:
     return start_kst.astimezone(clock.KST).replace(tzinfo=None) - timedelta(hours=9)
 
 
-@router.get("/me", response_model=MeResponse)
+@router.get("/me", response_model=AccountMeResponse)
 def me(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_session)):
+    """로그인 계정과 기본 프로필, 그리고 이 계정이 볼 수 있는 아이 프로필 전부.
+
+    `profile` 은 기본 프로필(첫인사를 마친 경우), `profiles` 는 내가 만든 프로필 + 초대로 연결된 프로필이다.
+    """
     profile = completed_profile(db, cu.user)
-    return MeResponse(
+    members = models_accounts.active_members(db, cu.user)
+    items = []
+    for member in members:
+        row = db.get(ChildProfile, member.profile_id)
+        if row is None:
+            continue
+        items.append(
+            MeProfileItem(
+                id=row.id,
+                nickname=row.nickname,
+                grade_or_age_band=row.grade_or_age_band,
+                interests=list(row.interests or []),
+                growth_goal=row.growth_goal,
+                role=member.role,
+                permissions=list(member.permissions or []),
+                is_default=member.is_default,
+                needs_first_greeting=row.completed_at is None,
+            )
+        )
+    db.commit()  # 기존 계정 이어받기로 만든 소속 행을 남긴다.
+    return AccountMeResponse(
         user=MeUser(id=cu.id, role=cu.user.role, needs_first_greeting=profile is None),
         profile=MeProfile(
             id=profile.id,
@@ -50,6 +74,7 @@ def me(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sessio
         )
         if profile
         else None,
+        profiles=items,
     )
 
 

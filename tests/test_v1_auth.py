@@ -156,7 +156,7 @@ def test_callback_sets_refresh_cookie_redirects_and_reuses_same_user(monkeypatch
     web.get("/api/v1/auth/kakao/callback", params={"code": "code-b", "state": state2})
     second = web.post("/api/v1/auth/token/refresh")
     assert second.json()["user"]["id"] == first.json()["user"]["id"]
-    assert second.json()["user"] == {"id": first.json()["user"]["id"], "role": "CHILD", "needsFirstGreeting": True}
+    assert second.json()["user"] == {"id": first.json()["user"]["id"], "role": "GUARDIAN", "needsFirstGreeting": True}
 
 
 def test_callback_cookie_without_secure_when_disabled(monkeypatch, fake_kakao):
@@ -205,7 +205,7 @@ def test_mobile_login_returns_tokens_in_body_and_access_works(monkeypatch, web, 
     body = mobile_login(web)
     assert body["accessToken"].startswith("jat_") and body["refreshToken"].startswith("jrt_")
     assert body["expiresIn"] == 3600 and body["refreshExpiresIn"] == 2592000
-    assert body["user"]["role"] == "CHILD" and body["user"]["needsFirstGreeting"] is True
+    assert body["user"]["role"] == "GUARDIAN" and body["user"]["needsFirstGreeting"] is True
     assert web.get(WHOAMI, headers=auth(body["accessToken"])).json()["userId"] == body["user"]["id"]
     assert mobile_login(web)["user"]["id"] == body["user"]["id"]
     assert mobile_login(web, "kakao-token-2")["user"]["id"] != body["user"]["id"]

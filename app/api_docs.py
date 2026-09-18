@@ -1114,6 +1114,146 @@ EXAMPLES.update(
 # --- end v1 activities ---
 
 
+# --- v1 accounts ---
+_V1A_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1A_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1A_ERRORS = (
+    "오류는 `{error: {code, message, details, requestId}}` 형식입니다. "
+    "내가 볼 수 없는 프로필은 `404 PROFILE_NOT_FOUND`, 권한이 없으면 `403 FORBIDDEN`, "
+    "보호자 동의가 필요하면 `403 CONSENT_REQUIRED`(`details.documentIds` 에 필요한 문서)."
+)
+TAGS.update(
+    {
+        "v1-profiles": (
+            "v1-7. 아이 프로필",
+            "로그인 계정(보호자·가족)이 아이 프로필을 여러 개 갖습니다. 프로필마다 별명·학년대·관심사와 "
+            "화면·보관 설정(ttsEnabled·guardianPreviewEnabled·theme·retentionDays)이 따로 있습니다. "
+            "수정은 `If-Match` 로 버전을 확인합니다.",
+        ),
+        "v1-guardian-links": (
+            "v1-8. 보호자 연결",
+            "다른 보호자를 1회용 초대 토큰으로 같은 아이 프로필에 연결하고, 권한(VIEW_PROFILE·VIEW_STORIES·"
+            "VIEW_REPORTS·REVIEW_SHARING·MANAGE_DATA)을 조절합니다. 연결 해제는 기록을 지우지 않습니다.",
+        ),
+        "v1-consents": (
+            "v1-9. 고지·동의",
+            "아이 개인정보·AI 대화·음성·공유 동의서(법률 검토 전 초안)와 동의 기록. 동의한 사람은 본문이 아니라 "
+            "로그인 계정에서 정합니다. AI 대화 동의가 있으면 demo 모드에서도 실제 AI 로 대화합니다.",
+        ),
+    }
+)
+OPERATIONS.update(
+    {
+        ("GET", "/api/v1/profiles"): (
+            "아이 프로필 목록",
+            "내가 만든 프로필과 초대로 연결된 프로필을 모두 돌려줍니다. `cursor`·`limit`(기본 20, 최대 50).",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/profiles"): (
+            "아이 프로필 만들기",
+            "아이를 한 명 더 등록합니다. 프로필마다 대화 기록이 따로 쌓입니다. "
+            "`makeDefault: true` 면 이 계정의 기본 프로필이 됩니다. `Idempotency-Key` 를 지원합니다.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/profiles/{profile_id}"): (
+            "아이 프로필 상세",
+            f"응답 헤더 `ETag` 에 현재 버전이 실립니다. {_V1A_ERRORS}",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/profiles/{profile_id}"): (
+            "아이 프로필 수정",
+            "보낸 키만 바꿉니다. `If-Match: \"3\"`(또는 본문 `version`)이 필요하고, 그 사이에 바뀌었으면 "
+            "`409 VERSION_CONFLICT` 와 함께 `details.currentVersion` 을 돌려줍니다. 권한: MANAGE_DATA.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/profiles/{profile_id}/settings"): (
+            "프로필 설정 보기",
+            "`ttsEnabled`(읽어 주기), `guardianPreviewEnabled`(보호자 먼저보기), `theme`, `retentionDays`(보관 기간).",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/profiles/{profile_id}/settings"): (
+            "프로필 설정 바꾸기",
+            "보관 기간을 바꾸면 `retentionNotice` 로 **무엇이 언제 지워지는지** 함께 알려 줍니다. "
+            "`If-Match` 로 설정 버전을 확인합니다. 권한: MANAGE_DATA.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian-links/invitations"): (
+            "보호자 초대 만들기",
+            "1회용 초대 토큰을 만듭니다(기본 30분). 토큰은 이 응답에서만 볼 수 있습니다. "
+            "아이 개인정보 동의(`privacy_child`)가 없으면 `403 CONSENT_REQUIRED`.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/guardian-links/invitations/{token}/accept"): (
+            "보호자 초대 받기",
+            "초대 토큰으로 내 계정을 그 아이 프로필에 연결합니다. 이미 쓴 초대는 `409 INVITATION_ALREADY_USED`, "
+            "시간이 지났으면 `409 INVITATION_EXPIRED`.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/guardian/children"): (
+            "연결된 아이 목록",
+            "이 계정이 볼 수 있는 아이와 각 연결의 권한을 돌려줍니다.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/guardian-links"): (
+            "보호자 연결 목록",
+            "내가 만든 프로필에 붙은 연결을 모두, 초대로 연결된 프로필은 내 연결만 보여 줍니다. `profileId` 로 좁힙니다.",
+            _V1A_TOKEN,
+        ),
+        ("PATCH", "/api/v1/guardian-links/{link_id}"): (
+            "보호자 권한 바꾸기",
+            "초대로 연결된 보호자의 권한만 바꿀 수 있습니다. 프로필을 만든 계정(OWNER)의 권한은 `403 FORBIDDEN`.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/guardian-links/{link_id}"): (
+            "보호자 연결 해제",
+            "연결만 끊습니다. 아이 기록은 지우지 않습니다(`dataDeleted: false`). 여러 번 불러도 결과가 같습니다.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/legal-documents"): (
+            "동의서·고지 문서",
+            "아이 개인정보(`privacy_child`)·AI 대화(`ai_conversation`)·음성(`voice_retention`)·공유(`community_share`). "
+            "**법률 검토 전 초안**이며 `version` 은 개정일입니다.",
+            _V1A_TOKEN,
+        ),
+        ("GET", "/api/v1/consents"): (
+            "동의 기록 목록",
+            "`current: true` 면 지금 쓰는 문서 버전에 대한 살아 있는 동의입니다. 권한: VIEW_PROFILE.",
+            _V1A_TOKEN,
+        ),
+        ("POST", "/api/v1/consents"): (
+            "동의하기",
+            "목적이 다른 동의를 `items` 로 한 번에 기록합니다. 동의한 사람은 본문의 `actor` 가 아니라 로그인 계정에서 정합니다. "
+            "`agreed: false` 는 이미 한 동의를 철회하고, 같은 버전에 이미 동의했으면 그 기록을 그대로 돌려줍니다. "
+            "권한: MANAGE_DATA.",
+            _V1A_TOKEN,
+        ),
+        ("DELETE", "/api/v1/consents/{consent_id}"): (
+            "동의 철회",
+            "기록은 남기고 철회 시각만 적습니다. AI 대화 동의를 철회하면 바로 규칙 기반 대화로 돌아갑니다.",
+            _V1A_TOKEN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("POST", "/api/v1/profiles"): {"nickname": "하늘", "gradeOrAgeBand": "3학년", "interests": ["공룡"], "makeDefault": False},
+        ("PATCH", "/api/v1/profiles/{profile_id}"): {"nickname": "하늘이", "version": 1},
+        ("PATCH", "/api/v1/profiles/{profile_id}/settings"): {"retentionDays": 30, "ttsEnabled": True, "version": 1},
+        ("POST", "/api/v1/guardian-links/invitations"): {
+            "profileId": "prf_…",
+            "permissions": ["VIEW_PROFILE", "VIEW_STORIES"],
+            "expiresInMinutes": 30,
+        },
+        ("PATCH", "/api/v1/guardian-links/{link_id}"): {"permissions": ["VIEW_PROFILE", "VIEW_REPORTS"]},
+        ("POST", "/api/v1/consents"): {
+            "profileId": "prf_…",
+            "items": [{"documentId": "privacy_child", "version": "2026-09-18", "agreed": True}],
+            "actor": "GUARDIAN",
+        },
+    }
+)
+# --- /v1 accounts ---
+
 # --- v1 ops ---
 _V1_OPS_TOKEN = "JJCP access token `jat_…`"
 AUTH_HELP[_V1_OPS_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
