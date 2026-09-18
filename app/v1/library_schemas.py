@@ -75,16 +75,24 @@ class StoryEdited(CamelModel):
 # --- 단어장 ----------------------------------------------------------------------
 
 
+class WordbookSource(CamelModel):
+    """명세 13절: 낱말을 만난 자리."""
+
+    conversation_id: str | None
+    message_id: str | None
+
+
 class WordbookEntryOut(CamelModel):
     id: str
     word: str
+    reading: str
     meaning: str
     example: str
     my_sentence: str | None
     status: WordStatus
-    source: Literal["ai", "fallback"]
-    source_conversation_id: str | None
-    source_message_id: str | None
+    source: WordbookSource
+    # 뜻풀이를 누가 썼는지(AI 인지 검수 사전인지). 명세 밖 추가 필드.
+    meaning_source: Literal["ai", "fallback"]
     source_sentence: str
     last_reviewed_at: str | None
     next_review_at: str | None
@@ -94,9 +102,11 @@ class WordbookEntryOut(CamelModel):
 
 class WordbookSummary(CamelModel):
     total: int
-    new: int
-    practicing: int
     familiar: int
+    practicing: int
+    new_this_week: int
+    # 표시용 추가 필드(명세 밖)
+    new: int
     due_for_review: int
 
 
@@ -165,6 +175,8 @@ class QuizCreateRequest(CamelModel):
 class QuizAnswerRequest(CamelModel):
     question_id: str = Field(min_length=1, max_length=48)
     option_id: str = Field(min_length=1, max_length=12)
+    # 기기에서 답한 시각. 기록에는 쓰지 않고 받기만 한다(명세 13절 예시 본문).
+    client_answered_at: str | None = None
 
 
 class QuizAnswerResult(CamelModel):

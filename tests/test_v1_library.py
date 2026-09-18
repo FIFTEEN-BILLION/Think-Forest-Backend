@@ -186,31 +186,31 @@ def test_wordbook_add_with_ai_then_fallback_and_summary(client, frozen, monkeypa
     fallback = save_word(client, user, conversation, RUNWAY, "활주로")
     assert fallback.status_code == 201
     entry = fallback.json()["entry"]
-    assert entry["source"] == "fallback" and entry["status"] == "NEW"
+    assert entry["meaningSource"] == "fallback" and entry["status"] == "NEW"
     assert entry["meaning"] == "비행기가 달리다가 뜨고 내리는 긴 길"  # 검수 사전
-    assert entry["sourceConversationId"] == conversation["id"]
+    assert entry["source"]["conversationId"] == conversation["id"]
     assert entry["nextReviewAt"] == iso(frozen["now"] + timedelta(days=1))  # NEW 는 하루 뒤
 
     tick(frozen, 60)
     calls = explain_ai(monkeypatch, "수증기", "물이 눈에 안 보이는 기체가 된 것", "냄비에서 수증기가 올라와.")
     explained = save_word(client, user, conversation, VAPOR, "수증기").json()["entry"]
-    assert explained["source"] == "ai" and explained["meaning"] == "물이 눈에 안 보이는 기체가 된 것"
+    assert explained["meaningSource"] == "ai" and explained["meaning"] == "물이 눈에 안 보이는 기체가 된 것"
     assert explained["example"] == "냄비에서 수증기가 올라와." and [c["purpose"] for c in calls] == ["words.explain"]
 
     again = save_word(client, user, conversation, VAPOR, "수증기")
     assert again.status_code == 200 and again.json()["entry"]["id"] == explained["id"]
     key = {**user["headers"], "Idempotency-Key": "word-1"}
-    first = client.post(ENTRIES, json={"word": "활주로", "messageId": entry["sourceMessageId"]}, headers=key)
-    assert client.post(ENTRIES, json={"word": "활주로", "messageId": entry["sourceMessageId"]}, headers=key).json() == first.json()  # noqa: E501
+    first = client.post(ENTRIES, json={"word": "활주로", "messageId": entry["source"]["messageId"]}, headers=key)
+    assert client.post(ENTRIES, json={"word": "활주로", "messageId": entry["source"]["messageId"]}, headers=key).json() == first.json()  # noqa: E501
 
     listed = client.get(WORDBOOK, headers=user["headers"]).json()
-    assert listed["summary"] == {"total": 2, "new": 2, "practicing": 0, "familiar": 0, "dueForReview": 0}
+    assert listed["summary"] == {"total": 2, "familiar": 0, "practicing": 0, "newThisWeek": 2, "new": 2, "dueForReview": 0}
     assert [e["word"] for e in listed["items"]] == ["수증기", "활주로"] and listed["nextCursor"] is None
     page = client.get(f"{WORDBOOK}?limit=1", headers=user["headers"]).json()
     assert len(page["items"]) == 1 and page["nextCursor"]
     assert [e["word"] for e in client.get(f"{WORDBOOK}?query=활주", headers=user["headers"]).json()["items"]] == ["활주로"]
 
-    missing = client.post(ENTRIES, json={"word": "고래", "messageId": entry["sourceMessageId"]}, headers=user["headers"])
+    missing = client.post(ENTRIES, json={"word": "고래", "messageId": entry["source"]["messageId"]}, headers=user["headers"])
     assert missing.status_code == 400 and missing.json()["error"]["details"]["fields"] == ["word"]
     assert client.post(ENTRIES, json={"word": "고래", "messageId": "msg_none"}, headers=user["headers"]).status_code == 404
 
@@ -228,7 +228,7 @@ def test_wordbook_patch_status_and_delete(client, frozen):
     assert patched["status"] == "FAMILIAR" and patched["mySentence"] == "활주로에 비행기가 서 있었다."
     assert patched["nextReviewAt"] == iso(frozen["now"] + timedelta(days=7))  # FAMILIAR 는 7일 뒤
     summary = client.get(WORDBOOK, headers=user["headers"]).json()["summary"]
-    assert summary == {"total": 1, "new": 0, "practicing": 0, "familiar": 1, "dueForReview": 0}
+    assert summary == {"total": 1, "familiar": 1, "practicing": 0, "newThisWeek": 1, "new": 0, "dueForReview": 0}
     assert [e["word"] for e in client.get(f"{WORDBOOK}?status=NEW", headers=user["headers"]).json()["items"]] == []
 
     assert client.get(f"{ENTRIES}/{entry['id']}", headers=user["headers"]).json()["entry"]["id"] == entry["id"]

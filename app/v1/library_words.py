@@ -28,6 +28,7 @@ from .library_schemas import (
     QuizOption,
     QuizQuestionOut,
     WordbookEntryOut,
+    WordbookSource,
     WordbookSummary,
     WordQuizOut,
 )
@@ -105,13 +106,15 @@ def entry_out(entry: WordbookEntry) -> WordbookEntryOut:
     return WordbookEntryOut(
         id=entry.id,
         word=entry.word,
+        reading=entry.word,
         meaning=entry.meaning,
         example=entry.example,
         my_sentence=entry.my_sentence,
         status=entry.status,  # type: ignore[arg-type]
-        source=entry.source,  # type: ignore[arg-type]
-        source_conversation_id=entry.source_conversation_id,
-        source_message_id=entry.source_message_id,
+        source=WordbookSource(
+            conversation_id=entry.source_conversation_id, message_id=entry.source_message_id
+        ),
+        meaning_source=entry.source,  # type: ignore[arg-type]
         source_sentence=entry.source_sentence,
         last_reviewed_at=iso(entry.last_reviewed_at),
         next_review_at=iso(entry.next_review_at),
@@ -124,8 +127,10 @@ def summary(db: Session, profile_id: str) -> WordbookSummary:
     rows = list(db.scalars(select(WordbookEntry).where(WordbookEntry.profile_id == profile_id)))
     now = clock.now()
     counts = {status: sum(1 for r in rows if r.status == status) for status in WORD_STATUSES}
+    week_ago = now - timedelta(days=7)
     return WordbookSummary(
         total=len(rows),
+        new_this_week=sum(1 for r in rows if r.created_at and r.created_at >= week_ago),
         new=counts["NEW"],
         practicing=counts["PRACTICING"],
         familiar=counts["FAMILIAR"],
