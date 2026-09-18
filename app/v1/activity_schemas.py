@@ -166,6 +166,7 @@ class TopicCategoryOut(CamelModel):
 
 class TopicCategoryList(CamelModel):
     items: list[TopicCategoryOut]
+    next_cursor: str | None = Field(default=None, description="기본 5 + 사용자 20개가 최대라 항상 한 번에 준다(null)")
 
 
 class TopicCategoryResponse(CamelModel):
@@ -208,6 +209,7 @@ class TopicScheduleOut(CamelModel):
 
 class TopicScheduleList(CamelModel):
     items: list[TopicScheduleOut]
+    next_cursor: str | None
 
 
 class TopicScheduleResponse(CamelModel):

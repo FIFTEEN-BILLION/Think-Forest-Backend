@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from ... import clock
 from ...db import get_session
 from .. import activity_schedules as schedules
-from .. import topic_catalog
+from .. import cursor, topic_catalog
 from ..activity_schemas import (
     TopicScheduleCreateRequest,
     TopicScheduleList,
@@ -38,10 +38,14 @@ def _own(db: Session, schedule_id: str) -> TopicSchedule:
 def list_topic_schedules(
     weekday: int | None = Query(default=None, ge=0, le=6),
     active: bool | None = Query(default=None, description="true 면 오늘(KST) 적용되는 편성만"),
+    cursor_raw: str | None = Query(default=None, alias="cursor"),
+    limit: int | None = Query(default=None),
     cu: CurrentUser = Depends(require_user),
     db: Session = Depends(get_session),
 ):
     schedules.require_admin(db, cu)
+    size = cursor.clamp_limit(limit)
+    offset = cursor.decode_offset(cursor_raw)
     rows = list(
         db.scalars(
             select(TopicSchedule).order_by(
@@ -53,7 +57,9 @@ def list_topic_schedules(
         rows = [r for r in rows if r.weekday in (None, weekday)]
     if active is not None:
         rows = [r for r in rows if schedules.is_active(r) is active]
-    return TopicScheduleList(items=[schedules.out(r) for r in rows])
+    page = rows[offset : offset + size]
+    next_cursor = cursor.encode_offset(offset + size) if len(rows) > offset + size else None
+    return TopicScheduleList(items=[schedules.out(r) for r in page], next_cursor=next_cursor)
 
 
 @router.post("", response_model=TopicScheduleResponse, status_code=201)

@@ -739,7 +739,8 @@ OPERATIONS.update(
         ),
         ("GET", "/api/v1/topic-categories"): (
             "주제 카테고리 목록",
-            "기본 카테고리(`kind: DEFAULT`, `editable: false`) 뒤에 내가 만든 카테고리(`kind: USER`)가 순서대로 붙습니다.",
+            "기본 카테고리(`kind: DEFAULT`, `editable: false`) 뒤에 내가 만든 카테고리(`kind: USER`)가 순서대로 붙습니다. "
+            "기본 5개 + 사용자 20개가 최대라 한 번에 모두 주고 `nextCursor` 는 항상 null 입니다.",
             _V1A_TOKEN,
         ),
         ("POST", "/api/v1/topic-categories"): (
@@ -760,7 +761,7 @@ OPERATIONS.update(
         ),
         ("GET", "/api/v1/admin/topic-schedules"): (
             "요일·기간별 주제 편성 조회 (운영자)",
-            "`weekday`(0=월 … 6=일), `active`(오늘 적용 여부)로 거를 수 있습니다. 허용 목록 밖 계정은 `403 FORBIDDEN`.",
+            "`weekday`(0=월 … 6=일), `active`(오늘 적용 여부), `cursor`·`limit`. 허용 목록 밖 계정은 `403 FORBIDDEN`.",
             _V1A_TOKEN,
         ),
         ("POST", "/api/v1/admin/topic-schedules"): (

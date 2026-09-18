@@ -340,7 +340,9 @@ def test_unsafe_theater_keyword_is_refused(client, frozen):
 
 def test_topic_categories_crud_and_default_protection(client, frozen):
     owner, other = make_user(), make_user()
-    defaults = client.get(CATEGORIES, headers=owner["headers"]).json()["items"]
+    listing = client.get(CATEGORIES, headers=owner["headers"]).json()
+    assert listing["nextCursor"] is None  # 명세 27절 목록 모양(개수가 정해져 있어 한 번에 준다)
+    defaults = listing["items"]
     assert [c["id"] for c in defaults] == ["SCIENCE", "MATH", "HISTORY", "THINKING", "DAILY_LIFE"]
     assert all(c["kind"] == "DEFAULT" and c["editable"] is False for c in defaults)
     assert defaults[0]["name"] == "과학" and defaults[0]["visual"] == "magnifier"
@@ -410,9 +412,10 @@ def test_schedule_crud_is_admin_only(client, frozen, admin_allowlist):
     bad_period = client.post(SCHEDULES, json={**body, "endsOn": "2026-09-10"}, headers=admin["headers"])
     assert bad_period.status_code == 400
 
-    listed = client.get(SCHEDULES, headers=admin["headers"]).json()["items"]
-    assert [s["id"] for s in listed] == [schedule["id"]]
+    listed = client.get(SCHEDULES, headers=admin["headers"]).json()
+    assert [s["id"] for s in listed["items"]] == [schedule["id"]] and listed["nextCursor"] is None
     assert client.get(f"{SCHEDULES}?weekday=2", headers=admin["headers"]).json()["items"] == []
+    assert client.get(f"{SCHEDULES}?cursor=zzz", headers=admin["headers"]).status_code == 400
     assert len(client.get(f"{SCHEDULES}?active=true", headers=admin["headers"]).json()["items"]) == 1
 
     patched = client.patch(
