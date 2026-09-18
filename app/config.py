@@ -61,6 +61,12 @@ class Settings(BaseModel):
     # refresh 쿠키 Secure 속성. http 로컬 개발에서만 false.
     auth_cookie_secure: bool = True
     # --- /v1 auth ---
+    # --- v1 accounts ---
+    # 보호자 초대 토큰 기본 유효 시간(분). 요청에서 5~1440 분으로 덮어쓸 수 있다.
+    guardian_invite_ttl_minutes: int = 30
+    # 한 계정이 만들 수 있는 아이 프로필 수.
+    max_profiles_per_account: int = 10
+    # --- /v1 accounts ---
 
     @property
     def ai_enabled(self) -> bool:
@@ -121,6 +127,10 @@ def get_settings() -> Settings:
         auth_dev_login=_flag(os.getenv("AUTH_DEV_LOGIN"), default=False),
         auth_cookie_secure=_flag(os.getenv("AUTH_COOKIE_SECURE")),
         # --- /v1 auth ---
+        # --- v1 accounts ---
+        guardian_invite_ttl_minutes=int(os.getenv("GUARDIAN_INVITE_TTL_MINUTES") or 30),
+        max_profiles_per_account=int(os.getenv("MAX_PROFILES_PER_ACCOUNT") or 10),
+        # --- /v1 accounts ---
     )
 
 
