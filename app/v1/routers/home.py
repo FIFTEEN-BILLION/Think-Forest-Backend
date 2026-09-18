@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ... import clock
 from ...db import get_session
-from .. import models_accounts, topic_catalog
+from .. import activity_home, activity_schedules, models_accounts, topic_catalog
 from ..cursor import iso
 from ..deps import CurrentUser, require_user
 from ..models_conversation import ChildProfile, ConversationMessage, ConversationSession, StoryRecord
@@ -90,7 +90,8 @@ def home(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sess
             reason=reason,
             estimated_minutes=minutes,
         )
-        for snap, reason in topic_catalog.recommend(db, cu.id, profile)
+        # 운영자 편성(`/admin/topic-schedules`)이 있으면 그 주제를 앞으로 올린다. 이유 문장은 편성에 적힌 것을 쓴다.
+        for snap, reason in activity_schedules.reorder(db, topic_catalog.recommend(db, cu.id, profile))
     ]
     latest = db.scalar(
         select(ConversationSession)
@@ -129,7 +130,8 @@ def home(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sess
         )
         if latest
         else None,
-        recent_words=[],
-        community_stories=[],
+        # 단어 보관함·친구 이야기 테이블은 다른 트랙이 만든다. 아직 없으면 빈 목록으로 내려간다.
+        recent_words=activity_home.recent_words(db, cu.id),
+        community_stories=activity_home.community_stories(db, cu.id),
         weekly_activity=WeeklyActivity(conversation_days=len(days), completed_stories=completed or 0),
     )
