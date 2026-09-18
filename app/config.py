@@ -61,6 +61,23 @@ class Settings(BaseModel):
     # refresh 쿠키 Secure 속성. http 로컬 개발에서만 false.
     auth_cookie_secure: bool = True
     # --- /v1 auth ---
+    # --- v1 ops ---
+    # 음성 스트리밍·알림·내 데이터. Vercel 서버리스는 WebSocket 을 붙잡고 있지 못한다 — Render/Fly 로 따로 올린다.
+    # 비우면 요청 주소에서 ws/wss 를 유도한다. WebSocket 을 못 여는 배포에서는 WEBSOCKET_ENABLED=false 로 끈다.
+    public_ws_base_url: str = ""
+    websocket_enabled: bool = True
+    speech_ticket_ttl_seconds: int = 30
+    speech_max_utterance_seconds: int = 60  # 한 발화 상한
+    speech_warn_utterance_seconds: int = 50  # 이때 부드럽게 마무리를 안내한다
+    # 푸시 발송 주소(Expo). 비우면 푸시는 보내지 않고 앱 내 알림만 기록한다.
+    expo_push_url: str = ""
+    expo_access_token: str | None = None
+    data_export_download_ttl_seconds: int = 600
+    data_deletion_grace_days: int = 7
+    account_deletion_grace_days: int = 30
+    # 삭제·탈퇴 요청에 필요한 재인증: 이 시간보다 오래된 access token 이면 다시 로그인하게 한다.
+    ops_reauth_max_age_seconds: int = 900
+    # --- /v1 ops ---
     # --- v1 accounts ---
     # 보호자 초대 토큰 기본 유효 시간(분). 요청에서 5~1440 분으로 덮어쓸 수 있다.
     guardian_invite_ttl_minutes: int = 30
@@ -103,6 +120,14 @@ class Settings(BaseModel):
     def openai_enabled(self) -> bool:
         """사고력 엔진의 실제 OpenAI 호출이 가능한 상태인지."""
         return bool(self.openai_api_key) and self.ai_switch
+
+    # --- v1 ops ---
+    @property
+    def push_enabled(self) -> bool:
+        """실제 푸시 발송이 가능한 상태인지. 아니면 앱 내 알림만 기록한다."""
+        return bool(self.expo_push_url)
+
+    # --- /v1 ops ---
 
     @property
     def typecast_enabled(self) -> bool:
@@ -153,6 +178,19 @@ def get_settings() -> Settings:
         auth_dev_login=_flag(os.getenv("AUTH_DEV_LOGIN"), default=False),
         auth_cookie_secure=_flag(os.getenv("AUTH_COOKIE_SECURE")),
         # --- /v1 auth ---
+        # --- v1 ops ---
+        public_ws_base_url=(os.getenv("PUBLIC_WS_BASE_URL") or "").rstrip("/"),
+        websocket_enabled=_flag(os.getenv("WEBSOCKET_ENABLED")),
+        speech_ticket_ttl_seconds=int(os.getenv("SPEECH_TICKET_TTL_SECONDS") or 30),
+        speech_max_utterance_seconds=int(os.getenv("SPEECH_MAX_UTTERANCE_SECONDS") or 60),
+        speech_warn_utterance_seconds=int(os.getenv("SPEECH_WARN_UTTERANCE_SECONDS") or 50),
+        expo_push_url=(os.getenv("EXPO_PUSH_URL") or "").strip(),
+        expo_access_token=os.getenv("EXPO_ACCESS_TOKEN") or None,
+        data_export_download_ttl_seconds=int(os.getenv("DATA_EXPORT_DOWNLOAD_TTL_SECONDS") or 600),
+        data_deletion_grace_days=int(os.getenv("DATA_DELETION_GRACE_DAYS") or 7),
+        account_deletion_grace_days=int(os.getenv("ACCOUNT_DELETION_GRACE_DAYS") or 30),
+        ops_reauth_max_age_seconds=int(os.getenv("OPS_REAUTH_MAX_AGE_SECONDS") or 900),
+        # --- /v1 ops ---
         # --- v1 accounts ---
         guardian_invite_ttl_minutes=int(os.getenv("GUARDIAN_INVITE_TTL_MINUTES") or 30),
         max_profiles_per_account=int(os.getenv("MAX_PROFILES_PER_ACCOUNT") or 10),

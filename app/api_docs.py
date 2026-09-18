@@ -1254,6 +1254,172 @@ EXAMPLES.update(
 )
 # --- /v1 accounts ---
 
+# --- v1 ops ---
+_V1_OPS_TOKEN = "JJCP access token `jat_…`"
+AUTH_HELP[_V1_OPS_TOKEN] = "JJCP access token. `Bearer jat_…` 형식으로 넣으세요 (로그인·토큰 갱신 응답의 accessToken)."
+_V1_OPS_NONE = "토큰 없음 (1회용 내려받기 토큰으로 확인)"
+TAGS.update(
+    {
+        "v1-speech": (
+            "v1-7. 음성 입력·읽어주기",
+            "말하는 동안 자막을 보여 주는 실시간 인식(WebSocket), 녹음 파일 재시도, 티키 메시지 읽어주기. "
+            "음성 조각은 메모리에서만 다루고 저장하지 않습니다. 보호자의 음성 동의가 필요합니다.",
+        ),
+        "v1-notifications": (
+            "v1-8. 알림·기기",
+            "푸시 토큰 등록·해제, 수신 설정, 앱 내 알림 목록과 읽음 처리. "
+            "푸시 문구에는 아이의 대화 내용을 넣지 않고 '확인할 공유 요청이 있어요'처럼 최소 정보만 담습니다.",
+        ),
+        "v1-data-rights": (
+            "v1-9. 내 데이터",
+            "저장된 개수·보관기간 조회, JSON 내보내기, 범위별 삭제와 계정 탈퇴. "
+            "삭제는 유예기간 안에는 취소할 수 있고, 감사 기록에는 요청자·대상 ID·시각·결과만 남습니다.",
+        ),
+    }
+)
+_V1_OPS_WS = (
+    "실시간 인식 흐름: ① 이 API 로 ticket 을 받고 ② `wss://…/api/v1/speech/stream?ticket=…` 로 붙어 "
+    "`{\"type\":\"START\",\"streamId\":…}` 를 보낸 뒤 ③ 16kHz mono PCM(s16le) 조각을 binary frame 으로 보냅니다. "
+    "서버는 `PARTIAL_TRANSCRIPT`(자막 교체용, 저장하지 않음)를 보내고 `{\"type\":\"STOP\"}` 을 받으면 "
+    "`FINAL_TRANSCRIPT`(text·confidence·durationMs)를 보냅니다. 오류는 `{\"type\":\"ERROR\", code, retryable, message}` 입니다."
+)
+OPERATIONS.update(
+    {
+        ("POST", "/api/v1/speech/stream-tickets"): (
+            "음성 스트리밍 접속권 발급",
+            f"한 번만 쓸 수 있고 약 30초 뒤 만료되는 ticket 을 발급합니다(access token 을 URL 에 넣지 않으려는 장치).\n\n{_V1_OPS_WS}\n\n"
+            "WebSocket 을 쓸 수 없는 배포(Vercel 서버리스 등)에서는 `503 STREAMING_UNAVAILABLE` 과 함께 "
+            "`/api/v1/speech/transcriptions` 로 안내합니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/speech/transcriptions"): (
+            "녹음 파일로 한 번 재시도",
+            "스트리밍이 끊겼을 때 기기에 남은 녹음을 보내 문장을 받습니다. 5MB·허용 형식(webm·mp4·m4a·wav·mp3·ogg)까지. "
+            "목소리를 찾지 못하면 `422 NO_SPEECH_DETECTED`. 파일은 저장하지 않습니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/speech/synthesis"): (
+            "티키 메시지 읽어주기",
+            "`messageId` 를 주면 그 티키 메시지를, 없으면 `text` 를 읽어 줍니다(mp3 바이트). 아이가 쓴 문장은 읽어 주지 않습니다. "
+            "금칙어가 섞이면 `422 UNSAFE_CONTENT`, 합성이 막히면 `503 AI_TEMPORARILY_UNAVAILABLE`.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/devices"): (
+            "푸시 토큰 등록·갱신",
+            "Expo push token(`ExponentPushToken[…]`)을 등록합니다. 같은 토큰을 다시 보내면 갱신만 합니다. "
+            "응답에는 토큰을 싣지 않습니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("DELETE", "/api/v1/devices/{device_id}"): (
+            "기기 등록 해제",
+            "로그아웃한 기기의 푸시 토큰을 지웁니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/notification-settings"): (
+            "알림 설정 조회",
+            "공유 요청·안전 안내·주간 기록 수신 여부. 없으면 기본값으로 만들어 돌려줍니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("PATCH", "/api/v1/notification-settings"): (
+            "알림 설정 변경",
+            "보낸 항목만 바꿉니다. `pushEnabled: false` 면 푸시는 멈추고 앱 내 알림은 계속 쌓입니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/notifications"): (
+            "앱 내 알림 목록",
+            "최신순. `unreadOnly`, `cursor`, `limit`(최대 50)과 `unreadCount` 를 씁니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/notifications/{notification_id}/read"): (
+            "알림 읽음 처리",
+            "여러 번 불러도 처음 읽은 시각이 그대로입니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/data/overview"): (
+            "내 데이터 한눈에 보기",
+            "저장된 프로필·대화·이야기·단어 개수와 보관기간, 삭제 요청으로 지금 숨긴 범위를 봅니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/data-exports"): (
+            "내보내기 작업 만들기",
+            "`202` 와 작업 ID 를 돌려줍니다. 내보낼 JSON 은 서버 안에서 만들어 DB 에 두고 파일로 남기지 않습니다. "
+            "`Idempotency-Key` 를 보내면 재시도해도 작업이 하나만 생깁니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/data-exports/{export_id}"): (
+            "내보내기 상태와 내려받기 주소",
+            "작업이 끝났으면 짧게 살고 **한 번만** 쓸 수 있는 내려받기 주소를 함께 줍니다. 만료되면 다시 조회해 새로 받습니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/data-exports/{export_id}/download"): (
+            "내보내기 파일 내려받기",
+            "`GET /data-exports/{exportId}` 가 준 1회용 `token` 으로 받습니다. 한 번 쓰면 그 주소는 사라집니다.",
+            _V1_OPS_NONE,
+        ),
+        ("POST", "/api/v1/data-deletion-requests"): (
+            "아이 데이터 삭제 요청",
+            "`confirmation` 은 정확히 `DELETE`. 보호자 권한(`MANAGE_DATA`)과 재인증이 필요합니다(오래된 토큰이면 `401 REAUTH_REQUIRED`). "
+            "요청 즉시 숨기고 유예기간이 지나면 이야기·공개 복사본·내보내기 파일까지 지웁니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/data-deletion-requests/{request_id}"): (
+            "삭제 진행 상태",
+            "`QUEUED`(유예기간) → `SUCCEEDED`. 지운 개수만 `result` 에 남고 지운 본문은 남기지 않습니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/data-deletion-requests/{request_id}/cancel"): (
+            "삭제 요청 취소",
+            "유예기간 안에서만 됩니다. 지난 뒤에는 `409 DELETION_NOT_CANCELLABLE`.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/account-deletion-requests"): (
+            "계정 탈퇴 요청",
+            "로그인 계정을 닫고 연결된 아이 데이터도 지웁니다(아이 프로필 삭제와는 다른 요청입니다). 재인증이 필요합니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("GET", "/api/v1/account-deletion-requests/{request_id}"): (
+            "계정 탈퇴 상태",
+            "유예기간과 처리 결과를 봅니다.",
+            _V1_OPS_TOKEN,
+        ),
+        ("POST", "/api/v1/account-deletion-requests/{request_id}/cancel"): (
+            "계정 탈퇴 취소",
+            "유예기간 안에서만 됩니다.",
+            _V1_OPS_TOKEN,
+        ),
+    }
+)
+EXAMPLES.update(
+    {
+        ("POST", "/api/v1/speech/stream-tickets"): {
+            "conversationId": "cnv_…",
+            "questionId": "여기에_currentInteraction.questionId",
+            "locale": "ko-KR",
+            "audio": {"encoding": "PCM_S16LE", "sampleRate": 16000, "channels": 1},
+        },
+        ("POST", "/api/v1/speech/synthesis"): {"messageId": "msg_…"},
+        ("POST", "/api/v1/devices"): {
+            "platform": "ANDROID",
+            "pushToken": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
+            "installationId": "01K0EXAMPLE",
+            "appVersion": "1.0.0",
+        },
+        ("PATCH", "/api/v1/notification-settings"): {"shareRequests": True, "safetyNotices": True},
+        ("POST", "/api/v1/data-exports"): {
+            "format": "JSON",
+            "include": ["PROFILE", "CONVERSATIONS", "STORIES", "WORDBOOK", "REPORTS"],
+        },
+        ("POST", "/api/v1/data-deletion-requests"): {
+            "scope": "ALL_CHILD_DATA",
+            "confirmation": "DELETE",
+            "reason": "USER_REQUEST",
+        },
+        ("POST", "/api/v1/account-deletion-requests"): {"confirmation": "DELETE", "reason": "USER_REQUEST"},
+    }
+)
+# --- /v1 ops ---
+
+
 def install(app: FastAPI) -> None:
     """생성된 스키마에 한국어 이름·설명·예시를 덧붙이는 openapi 함수로 바꾼다."""
 
