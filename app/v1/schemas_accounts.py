@@ -237,7 +237,9 @@ class ConsentListResponse(CamelModel):
 
 class ConsentItemRequest(CamelModel):
     document_id: str = Field(min_length=1, max_length=40)
-    version: str | None = Field(default=None, max_length=20, description="비우면 지금 문서 버전")
+    version: str | None = Field(
+        default=None, max_length=20, description="일반 계정은 생략 시 현재 버전. 게스트 동의 등록 시 필수"
+    )
     agreed: bool = True
 
 
@@ -247,6 +249,10 @@ class ConsentCreateRequest(CamelModel):
     profile_id: str = Field(min_length=1, max_length=48)
     items: list[ConsentItemRequest] = Field(min_length=1, max_length=10)
     actor: str | None = Field(default=None, description="서버는 이 값을 쓰지 않는다")
+    guardian_confirmed: bool = Field(
+        default=False,
+        description="보호자가 직접 확인했는지. 게스트의 agreed=true 항목이 있으면 true 필수(403). 본인인증 여부가 아님",
+    )
 
 
 # --- /me ------------------------------------------------------------------------
@@ -265,7 +271,7 @@ class MeProfileItem(CamelModel):
 
 
 class AccountMeResponse(CamelModel):
-    """기존 키(user·profile)는 그대로 두고 프로필 목록만 더한다."""
+    """신규 계정의 빈 기본 프로필은 profiles에 포함된다. profile은 첫인사 완료 전 null이다."""
 
     user: MeUser
     profile: MeProfile | None

@@ -1,296 +1,369 @@
-"""v1 티키와 첫인사 — 첫 질문·이어하기·한 항목씩 묻기·완료와 프로필 저장·종료 의도·멱등·안전·AI 경로·소유권."""
+"""서버 AI 첫인사 계약 테스트. 모의 AI는 해석 정확도가 아니라 저장·출처·재시도 계약을 검증한다."""
 
 from __future__ import annotations
 
 import itertools
+import json
 
+import pytest
 from app import db
-from app.models import Child, SafetyEvent
+from app.models import SafetyEvent
+from app.safety import pii
 from app.v1 import ai_gate
-from app.v1.models_conversation import ChildProfile, ConversationFact, ConversationMessage
+from app.v1.greeting_engine import empty_draft
+from app.v1.models_conversation import ChildProfile, ConversationFact, ConversationMessage, ConversationSession
 from app.v1.schemas_conversation import FirstGreetingLLM
 from sqlalchemy import select
 
-from conftest import tick
 from test_v1_conversations import make_user
 
 BASE = "/api/v1/first-greeting/sessions"
 _ids = itertools.count(1)
+ALIEN = "나는 외계 32행성에서 온 외계인 삐리빠라 3세야 나를 삐리빠라 3세에서 3세는 빼고 불러도 돼"
+AMBIGUOUS = "나는 감자일까 아닐까? 너가 맞춰보세요 저는 숭실초 3학년이 아닙니다 제가 좋아하는것은 아직 말 안할거에용"
 
 
-def begin(client, user: dict, key: str | None = None) -> dict:
-    headers = {**user["headers"], **({"Idempotency-Key": key} if key else {})}
-    res = client.post(BASE, headers=headers)
+def output(message="이야기를 들려줄래?", changes=None, *, review=False, summary=None, memory="", end="none"):
+    return dict(
+        message=message,
+        changes=changes or [],
+        context_summary=memory,
+        propose_review=review,
+        profile_summary=summary,
+        end_intent=end,
+    )
+
+
+def change(field, value=None, *, operation="SET", values=None, quote=None, message_id="CURRENT"):
+    return dict(
+        field=field,
+        operation=operation,
+        value=value,
+        values=values or [],
+        evidence=[dict(message_id=message_id, quote=quote or "CURRENT")],
+    )
+
+
+@pytest.fixture
+def ai(monkeypatch):
+    queue, calls = [], []
+    monkeypatch.setattr(ai_gate, "ai_block_reason", lambda _: None)
+    monkeypatch.setattr(ai_gate, "moderate", lambda *_: None)
+
+    def fake(**kwargs):
+        data = json.loads(kwargs["user_input"])
+        calls.append(data)
+        if data["event"] == "START":
+            return FirstGreetingLLM(**output("안녕! 나는 티키야. 오늘은 어떤 이야기를 해 볼까?"))
+        assert queue, "unscripted AI call"
+        scripted = queue.pop(0)
+        if isinstance(scripted, Exception):
+            raise scripted
+        scripted = json.loads(json.dumps(scripted))
+        for item in scripted["changes"]:
+            for evidence in item["evidence"]:
+                if evidence["message_id"] == "CURRENT":
+                    evidence["message_id"] = data["current_message_id"]
+                if evidence["quote"] == "CURRENT":
+                    evidence["quote"] = data["messages"][-1]["content"]
+        return FirstGreetingLLM(**scripted)
+
+    monkeypatch.setattr(ai_gate, "call_structured", fake)
+    return queue, calls
+
+
+def begin(client, user, key=None):
+    r = client.post(BASE, headers={**user["headers"], **({"Idempotency-Key": key} if key else {})})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def reply(client, user, sid, text=None, *, option=None, cmid=None, question=None):
+    return client.post(
+        f"{BASE}/{sid}/messages",
+        headers=user["headers"],
+        json={
+            "clientMessageId": cmid or f"fg-{next(_ids)}",
+            "questionId": question,
+            "input": {"type": "SINGLE_CHOICE", "optionId": option} if option else {"type": "TEXT", "text": text},
+        },
+    )
+
+
+def filled(client, user, sid, ai):
+    ai[0].append(
+        output(
+            "별, 2학년, 공룡이 좋고 큰 이빨이 신기하구나. 질문하기를 배우고 싶다고 기억하면 될까?",
+            [
+                change("nickname", "별"),
+                change("gradeOrAgeBand", "2학년"),
+                change("interests", values=["공룡"]),
+                change("interestDetails", values=["큰 이빨이 신기해"]),
+                change("growthGoal", "질문하기"),
+            ],
+            review=True,
+            summary="별은 공룡을 좋아하고 질문하기를 배우고 싶어 해요.",
+        )
+    )
+    res = reply(
+        client, user, sid, "별이라고 불러줘. 2학년이야. 공룡의 큰 이빨이 신기해서 좋아. 질문하기를 배우고 싶어."
+    )
     assert res.status_code == 200, res.text
     return res.json()
 
 
-def reply(client, user: dict, session_id: str, text: str | None = None, option: str | None = None, cmid: str | None = None):
-    body = {"clientMessageId": cmid or f"fg-{next(_ids)}"}
-    body["input"] = {"type": "SINGLE_CHOICE", "optionId": option} if option else {"type": "TEXT", "text": text}
-    return client.post(f"{BASE}/{session_id}/messages", json=body, headers=user["headers"])
-
-
-def fill_profile(client, user: dict, session_id: str, frozen: dict) -> list[dict]:
-    answers = [
-        "나는 별이라고 불러 줘. 2학년이고 공룡을 좋아해.",
-        "티라노사우루스 이빨이 엄청 커서 멋있어",
-        "궁금한 걸 질문하는 힘을 키우고 싶어",
-    ]
-    bodies = []
-    for text in answers:
-        tick(frozen, 20)
-        res = reply(client, user, session_id, text)
-        assert res.status_code == 200, res.text
-        bodies.append(res.json())
-    return bodies
-
-
-def test_fallback_first_greeting_asks_one_item_at_a_time_and_completes(client, frozen):
+def test_ai_opening_resume_pagination_and_idempotency(client, frozen, ai):
     user = make_user()
-    start = begin(client, user, key="fg-start")
-    assert start["status"] == "ACTIVE" and start["resumed"] is False
-    assert [m["content"] for m in start["messages"]] == ["자기소개해볼까?"]
-    assert start["messages"][0]["role"] == "ASSISTANT"
-    assert start["readiness"] == {
-        "ready": False, "progress": 0, "missing": ["NICKNAME", "GRADE_OR_AGE", "INTEREST", "INTEREST_DETAIL", "GROWTH_GOAL"]
-    }  # fmt: skip
-    assert start["profileDraft"] == {
-        "nickname": None, "schoolOrGroup": None, "gradeOrAgeBand": None, "interests": [], "interestDetails": [],
-        "growthGoal": None,
-    }  # fmt: skip
-    resumed = begin(client, user)
-    assert resumed["sessionId"] == start["sessionId"] and resumed["resumed"] is True
-    assert begin(client, user, key="fg-start") == start  # 같은 Idempotency-Key 는 처음 응답 그대로
-    session_id = start["sessionId"]
-
-    first, detail, goal = fill_profile(client, user, session_id, frozen)
-    assert first["profileDraft"]["nickname"] == "별"
-    assert first["profileDraft"]["gradeOrAgeBand"] == "초등학교 2학년"
-    assert first["profileDraft"]["interests"] == ["공룡"]
-    assert first["readiness"] == {"ready": False, "progress": 60, "missing": ["INTEREST_DETAIL", "GROWTH_GOAL"]}
-    assert first["assistantMessage"]["content"] == "별이는 공룡을 좋아하는구나! 공룡이 왜 좋아? 기억나는 일이 있으면 들려줘!"
-    assert first["nextInteraction"]["type"] == "TEXT" and first["status"] == "ACTIVE"
-    assert first["endIntentDetected"] is False and first["completion"] is None
-
-    assert detail["profileDraft"]["interestDetails"] == ["티라노사우루스 이빨이 엄청 커서 멋있어"]
-    assert detail["readiness"]["missing"] == ["GROWTH_GOAL"]
-    assert "마지막 질문!" in detail["assistantMessage"]["content"]
-
-    assert goal["profileDraft"]["growthGoal"] == "궁금한 걸 질문하는 힘"
-    assert goal["status"] == "READY_TO_FINISH" and goal["readiness"] == {"ready": True, "progress": 100, "missing": []}
-    assert "마지막으로 한 번 확인" in goal["assistantMessage"]["content"]
-    assert goal["nextInteraction"]["options"][0]["id"] == "CONFIRM_PROFILE"
-
-    tick(frozen, 20)
-    more = reply(client, user, session_id, "나는 수영도 잘해").json()  # 준비된 뒤에도 계속 이야기할 수 있다
-    assert more["status"] == "READY_TO_FINISH" and more["completion"] is None
-
-    headers = {**user["headers"], "Idempotency-Key": "fg-done"}
-    done = client.post(f"{BASE}/{session_id}/complete", json={"trigger": "BUTTON"}, headers=headers)
-    assert done.status_code == 200, done.text
-    body = done.json()
-    assert body["status"] == "COMPLETED" and body["completedAt"].endswith("Z")
-    assert body["profile"]["id"].startswith("prf_")
-    assert {k: body["profile"][k] for k in ("nickname", "gradeOrAgeBand", "interests", "interestDetails", "growthGoal")} == {
-        "nickname": "별", "gradeOrAgeBand": "초등학교 2학년", "interests": ["공룡"],
-        "interestDetails": ["티라노사우루스 이빨이 엄청 커서 멋있어"], "growthGoal": "궁금한 걸 질문하는 힘",
-    }  # fmt: skip
-    assert body["summary"] == "별이는 공룡을 좋아하고, 티키와 함께 ‘궁금한 걸 질문하는 힘’을 키워 가고 싶어 해요."
-    assert client.post(f"{BASE}/{session_id}/complete", json={}, headers=headers).json() == body
-    assert client.post(f"{BASE}/{session_id}/complete", headers=user["headers"]).json() == body
-
-    me = client.get("/api/v1/me", headers=user["headers"]).json()
-    assert me["user"] == {"id": user["id"], "role": "CHILD", "needsFirstGreeting": False}
-    assert me["profile"] == {
-        "id": body["profile"]["id"], "nickname": "별", "gradeOrAgeBand": "초등학교 2학년", "interests": ["공룡"],
-        "growthGoal": "궁금한 걸 질문하는 힘",
-    }  # fmt: skip
+    start = begin(client, user, key="start-once")
+    assert start["messages"][0]["content"] == "안녕! 나는 티키야. 오늘은 어떤 이야기를 해 볼까?"
+    assert start["messages"][0]["source"] == "ai"
+    assert start["profileDraft"] == empty_draft()
+    assert begin(client, user)["resumed"] is True
+    assert begin(client, user, key="start-once") == start
+    assert len(ai[1]) == 1
+    ai[0].append(
+        output(
+            "반가워, 삐리빠라! 32행성에서는 어떤 놀이를 해?",
+            [change("nickname", "삐리빠라")],
+            memory="역할놀이 설정: 32행성 외계인",
+        )
+    )
+    r = reply(client, user, start["sessionId"], ALIEN, cmid="one")
+    assert r.status_code == 200, r.text
+    result = r.json()
+    assert result["profileDraft"] == {**empty_draft(), "nickname": "삐리빠라"}
+    assert result["assistantMessage"]["content"] == "반가워, 삐리빠라! 32행성에서는 어떤 놀이를 해?"
+    assert result["assistantMessage"]["source"] == "ai"
+    assert result["profileRevision"] == 1
+    assert reply(client, user, start["sessionId"], "다른 말", cmid="one").json() == result
+    assert len(ai[1]) == 2
+    detail = client.get(f"{BASE}/{start['sessionId']}?limit=2", headers=user["headers"]).json()
+    assert detail["profileDraft"] == result["profileDraft"] and detail["nextCursor"]
+    assert len(detail["messages"]) == 2
+    older = client.get(
+        f"{BASE}/{start['sessionId']}", params={"messageCursor": detail["nextCursor"]}, headers=user["headers"]
+    ).json()
+    assert len(older["messages"]) == 1
     with next(db.get_session()) as session:
-        child = session.get(Child, user["child_id"])
-        assert (child.nickname, child.grade, child.likes, child.want_to_learn, child.profile_confirmed) == (
-            "별", 2, ["공룡"], ["궁금한 걸 질문하는 힘"], True
-        )  # fmt: skip
-        assert session.scalar(select(ChildProfile).where(ChildProfile.child_id == user["child_id"])).version == 1
-        facts = session.scalars(select(ConversationFact).where(ConversationFact.current.is_(True))).all()
-        assert {f.field for f in facts} >= {"NICKNAME", "GRADE_OR_AGE", "INTEREST", "INTEREST_DETAIL", "GROWTH_GOAL"}
-        assert all(f.source_message_id and f.source_message_id.startswith("msg_") for f in facts)
-
-    closed = reply(client, user, session_id, "하나 더 있어")
-    assert closed.status_code == 409 and closed.json()["error"]["code"] == "SESSION_CLOSED"
-    restored = client.get(f"{BASE}/{session_id}", headers=user["headers"]).json()
-    assert restored["status"] == "COMPLETED" and restored["currentInteraction"] is None
+        facts = list(session.scalars(select(ConversationFact)))
+        assert [(f.field, f.value) for f in facts] == [("NICKNAME", "삐리빠라")]
+        assert facts[0].source_message_id == result["userMessage"]["id"]
 
 
-def test_complete_before_ready_returns_missing(client, frozen):
-    user = make_user()
-    session_id = begin(client, user)["sessionId"]
-    reply(client, user, session_id, "내 별명은 하늘이야")
-    r = client.post(f"{BASE}/{session_id}/complete", json={"trigger": "BUTTON"}, headers=user["headers"])
-    assert r.status_code == 409
-    error = r.json()["error"]
-    assert error["code"] == "FIRST_GREETING_NOT_READY" and error["requestId"].startswith("req_")
-    assert error["details"]["missing"] == ["GRADE_OR_AGE", "INTEREST", "INTEREST_DETAIL", "GROWTH_GOAL"]
-
-
-def test_step_by_step_answers_do_not_save_school_name(client, frozen):
-    user = make_user()
-    session_id = begin(client, user)["sessionId"]
-    yes = reply(client, user, session_id, "응!").json()
-    assert yes["profileDraft"]["nickname"] is None
-    assert yes["assistantMessage"]["content"] == "좋아! 티키가 너를 뭐라고 부르면 좋을까? 별명도 좋아!"
-    nick = reply(client, user, session_id, "내 별명은 하늘이야").json()
-    assert nick["profileDraft"]["nickname"] == "하늘"
-    assert nick["assistantMessage"]["content"].startswith("만나서 반가워, 하늘아! 너는 몇 학년이야?")
-    grade = reply(client, user, session_id, "나는 햇살초등학교 3학년이야").json()
-    assert grade["profileDraft"]["gradeOrAgeBand"] == "초등학교 3학년"
-    assert grade["profileDraft"]["schoolOrGroup"] == "초등학교"
-    assert "햇살" not in grade["userMessage"]["content"]
-    likes = reply(client, user, session_id, "나는 축구랑 고양이를 좋아해").json()
-    assert likes["profileDraft"]["interests"] == ["축구", "고양이"]
-    assert likes["assistantMessage"]["content"].startswith("하늘이는 축구를 좋아하는구나! 축구가 왜 좋아?")
-    unsure = reply(client, user, session_id, "몰라").json()
-    assert unsure["assistantMessage"]["content"].startswith("괜찮아, 천천히 생각해도 돼. 축구가 왜 좋아?")
-    age = make_user()
-    sid = begin(client, age)["sessionId"]
-    reply(client, age, sid, "별이야")
-    assert reply(client, age, sid, "여덟 살이야").json()["profileDraft"]["gradeOrAgeBand"] == "8살"
-    with next(db.get_session()) as session:
-        assert not any("햇살" in c for c in session.scalars(select(ConversationMessage.content)).all())
-
-
-def test_end_intent_completes_when_ready_or_asks_one_more(client, frozen):
-    user = make_user()
-    session_id = begin(client, user)["sessionId"]
-    early = reply(client, user, session_id, "그만할래").json()
-    assert early["endIntentDetected"] is True and early["status"] == "ACTIVE" and early["completion"] is None
-    assert early["assistantMessage"]["content"] == "아직 티키가 기억하고 싶은 게 하나 있어! 티키가 너를 뭐라고 부르면 좋을까? 별명도 좋아!"  # noqa: E501
-    assert early["profileDraft"]["nickname"] is None
-
-    unsure = reply(client, user, session_id, "졸려").json()
-    assert unsure["nextInteraction"]["type"] == "SINGLE_CHOICE"
-    assert unsure["nextInteraction"]["options"] == [{"id": "END", "label": "응, 그만할래"}, {"id": "CONTINUE", "label": "아니, 더 할래"}]  # noqa: E501
-    mismatch = reply(client, user, session_id, option="MAYBE")
-    assert mismatch.status_code == 409 and mismatch.json()["error"]["code"] == "QUESTION_MISMATCH"
-    cont = reply(client, user, session_id, option="CONTINUE").json()
-    assert cont["assistantMessage"]["content"] == "좋아, 계속 이야기하자! 티키가 너를 뭐라고 부르면 좋을까? 별명도 좋아!"
-    assert cont["nextInteraction"]["type"] == "TEXT"
-
-    fill_profile(client, user, session_id, frozen)
-    tick(frozen, 10)
-    finished = reply(client, user, session_id, "이제 그만하자").json()
-    assert finished["endIntentDetected"] is True and finished["status"] == "COMPLETED"
-    assert finished["nextInteraction"] is None
-    assert finished["completion"]["profile"]["nickname"] == "별"
-    assert client.get("/api/v1/me", headers=user["headers"]).json()["user"]["needsFirstGreeting"] is False
-    assert begin(client, user)["resumed"] is False  # 완료 뒤에는 새 세션
-
-
-def test_client_message_id_replay_and_unsafe_content(client, frozen):
-    user = make_user()
-    session_id = begin(client, user)["sessionId"]
-    first = reply(client, user, session_id, "나는 별이야", cmid="same-1")
-    second = reply(client, user, session_id, "나는 달이야", cmid="same-1")
-    assert first.json() == second.json() and second.json()["profileDraft"]["nickname"] == "별"
-    detail = client.get(f"{BASE}/{session_id}?limit=2", headers=user["headers"]).json()
-    assert len(detail["messages"]) == 2 and detail["nextCursor"] == detail["messages"][0]["id"]
-    older = client.get(f"{BASE}/{session_id}?messageCursor={detail['nextCursor']}", headers=user["headers"]).json()
-    assert [m["content"] for m in older["messages"]] == ["자기소개해볼까?"]
-
-    unsafe = reply(client, user, session_id, "대통령 선거 얘기 하자")
-    assert unsafe.status_code == 422 and unsafe.json()["error"]["code"] == "UNSAFE_CONTENT"
-    with next(db.get_session()) as session:
-        assert not any("대통령" in c for c in session.scalars(select(ConversationMessage.content)).all())
-        assert [e.category for e in session.scalars(select(SafetyEvent)).all()] == ["politics"]
-    assert len(client.get(f"{BASE}/{session_id}", headers=user["headers"]).json()["messages"]) == 3
-
-
-def test_final_profile_review_restores_and_corrects_all_three_fields(client, frozen):
+def test_ai_controls_question_order_roleplay_and_deferral(client, frozen, ai):
     user = make_user()
     sid = begin(client, user)["sessionId"]
-    summary = fill_profile(client, user, sid, frozen)[-1]
-    assert "이름(별명): 별" in summary["assistantMessage"]["content"]
-    assert "소속: 초등학교 2학년" in summary["assistantMessage"]["content"]
-    assert "좋아하는 것: 공룡" in summary["assistantMessage"]["content"]
-    restored = client.get(f"{BASE}/{sid}", headers=user["headers"]).json()
-    assert restored["currentInteraction"] == summary["nextInteraction"]
-    for option, text, field, expected in [
-        ("EDIT_NICKNAME", "내 이름은 하늘이야", "nickname", "하늘"),
-        ("EDIT_SCHOOL", "홈스쿨", "schoolOrGroup", "홈스쿨"),
-        ("EDIT_INTEREST", "고양이랑 축구를 좋아해", "interests", ["고양이", "축구"]),
-    ]:
-        asked = reply(client, user, sid, option=option).json()
-        assert asked["nextInteraction"]["type"] == "TEXT"
-        corrected = reply(client, user, sid, text).json()
-        assert corrected["profileDraft"][field] == expected
-        assert corrected["nextInteraction"]["options"][0]["id"] == "CONFIRM_PROFILE"
-        assert corrected["completion"] is None
-    confirmed = reply(client, user, sid, option="CONFIRM_PROFILE", cmid="confirmed-profile")
-    assert confirmed.status_code == 200
-    saved = confirmed.json()["completion"]["profile"]
-    assert saved["nickname"] == "하늘" and saved["schoolOrGroup"] == "홈스쿨"
-    assert saved["interests"] == ["고양이", "축구"]
-    assert reply(client, user, sid, option="CONFIRM_PROFILE", cmid="confirmed-profile").json() == confirmed.json()
-
-
-def test_other_user_cannot_read_or_answer_session(client, frozen):
-    owner, other = make_user(), make_user()
-    session_id = begin(client, owner)["sessionId"]
-    assert client.get(f"{BASE}/{session_id}", headers=other["headers"]).json()["error"]["code"] == "SESSION_NOT_FOUND"
-    assert reply(client, other, session_id, "나는 별이야").status_code == 404
-    assert client.post(f"{BASE}/{session_id}/complete", headers=other["headers"]).status_code == 404
-    assert begin(client, other)["sessionId"] != session_id
-    assert client.post(BASE).status_code == 401
-
-
-def test_ai_extraction_uses_ai_question_only_for_the_next_missing_item(client, frozen, monkeypatch):
-    monkeypatch.setattr(ai_gate, "ai_block_reason", lambda child: None)
-    outputs = [
-        FirstGreetingLLM(
-            nickname="별", grade=2, age=None, affiliation="elementary", interests=["공룡"], interest_details=[],
-            growth_goal=None, end_intent="none", reaction="별이는 공룡을 좋아하는구나!",
-            question="어떤 공룡이 제일 좋고, 왜 좋아?", asked_field="INTEREST_DETAIL",
-        ),
-        FirstGreetingLLM(
-            nickname=None, grade=None, age=None, affiliation=None, interests=[],
-            interest_details=["티라노사우루스의 큰 이빨이 신기함"], growth_goal=None, end_intent="none",
-            reaction="큰 이빨이 신기했구나!", question="너는 몇 학년이야?", asked_field="GRADE_OR_AGE",
-        ),
-    ]  # fmt: skip
-    calls = []
-
-    def fake(**kwargs):
-        calls.append(kwargs)
-        return outputs[len(calls) - 1]
-
-    monkeypatch.setattr(ai_gate, "call_structured", fake)
-    user = make_user(is_tester=True)
-    session_id = begin(client, user)["sessionId"]
-    first = reply(client, user, session_id, "나는 별이라고 불러 줘. 2학년이고 공룡을 좋아해.").json()
-    assert first["assistantMessage"]["content"] == "별이는 공룡을 좋아하는구나! 어떤 공룡이 제일 좋고, 왜 좋아?"
-    assert first["profileDraft"]["schoolOrGroup"] == "초등학교"
-    assert "NICKNAME(불러 줄 별명)" in calls[0]["user_input"] and calls[0]["purpose"] == "first_greeting.extract"
-    second = reply(client, user, session_id, "티라노사우루스 이빨이 커서 신기해").json()
-    # AI 가 이미 아는 학년을 다시 물으면 버리고 다음 부족한 항목(GROWTH_GOAL)을 규칙 질문으로 묻는다.
-    assert second["assistantMessage"]["content"].startswith("큰 이빨이 신기했구나! 마지막 질문!")
-    assert second["readiness"]["missing"] == ["GROWTH_GOAL"]
-    with next(db.get_session()) as session:
-        confidences = {f.field: f.confidence for f in session.scalars(select(ConversationFact))}
-        assert confidences["INTEREST_DETAIL"] == 0.8
-
-
-def test_rule_parsers_keep_kid_phrases():
-    from app.v1 import greeting_engine as ge
-    from app.v1 import story_engine as se
-
-    assert ge.parse_nickname("안녕!") is None and ge.parse_nickname("응") is None
-    assert ge.parse_nickname("하늘이라고 불러줘") == "하늘"
-    assert ge.parse_interests("그림 그리기랑 강아지 좋아해", asked=True) == ["그림 그리기", "강아지"]
-    assert ge.parse_interests("나는 공룡이랑 축구를 좋아해", asked=True) == ["공룡", "축구"]
-    assert ge.parse_interests("고양이", asked=True) == ["고양이"]
-    assert ge.clean_goal("과학을 더 잘하고 싶어") == "과학 잘하기"
-    assert ge.clean_goal("몰라") is None
-    assert se.question_for("idea", {"hook": "눈이 오는 날을 본 적 있니? 눈으로 어떤 걸 할 수 있을까?"})[0] == (
-        "눈으로 어떤 걸 할 수 있을까?"
+    ai[0].append(
+        output(
+            "아직은 비밀이구나. 그럼 오늘 어떤 이야기를 해 볼까?",
+            [change("interests", operation="DEFER")],
+            memory="관심사 공개를 원하지 않음",
+        )
     )
-    assert se.reaction_for("idea", "눈사람을 만들 수 있을 것 같아.", None) == "“눈사람을 만들 수 있을 것 같아”라고 생각했구나."
+    result = reply(client, user, sid, AMBIGUOUS).json()
+    assert result["profileDraft"] == empty_draft()
+    assert result["deferredFields"] == ["interests"]
+    ai[0].append(output("행성의 풍경이 궁금해!", [], memory="역할놀이 설정: 행성 놀이"))
+    next_turn = reply(client, user, sid, "내 행성에서는 운석을 던지는 놀이를 해").json()
+    assert next_turn["profileDraft"] == empty_draft()
+    assert next_turn["deferredFields"] == ["interests"]
+    assert next_turn["assistantMessage"]["content"] == "행성의 풍경이 궁금해!"
+    assert ai[1][-1]["deferred"] == ["interests"]
+    assert ai[1][-1]["context_summary"] == "관심사 공개를 원하지 않음"
+    assert any(m["content"] == AMBIGUOUS for m in ai[1][-1]["messages"] if m["role"] == "USER")
+
+
+def test_semantic_corrections_and_defer_preserve_existing_values(client, frozen, ai):
+    user = make_user()
+    sid = begin(client, user)["sessionId"]
+    filled(client, user, sid, ai)
+    ai[0].append(output("지금 말하지 않아도 괜찮아.", [change("interests", operation="DEFER")]))
+    deferred = reply(client, user, sid, "좋아하는 건 지금 이야기 안 할래").json()
+    assert deferred["profileDraft"]["interests"] == ["공룡"]
+    assert deferred["deferredFields"] == ["interests"]
+    ai[0].append(
+        output(
+            "바로잡아 줘서 고마워. 축구는 어떤 점이 좋아?",
+            [
+                change("gradeOrAgeBand", "4학년"),
+                change("interests", values=["공룡"], operation="REMOVE"),
+                change("interests", values=["축구"], operation="ADD"),
+                change("interestDetails", operation="CLEAR"),
+            ],
+        )
+    )
+    corrected = reply(client, user, sid, "2학년 아니라 4학년이야. 공룡 좋아한다는 건 취소하고 축구가 좋아.").json()
+    assert corrected["profileDraft"]["gradeOrAgeBand"] == "4학년"
+    assert corrected["profileDraft"]["interests"] == ["축구"]
+    assert corrected["profileDraft"]["interestDetails"] == []
+    assert corrected["deferredFields"] == []
+    with next(db.get_session()) as session:
+        assert (
+            session.scalar(
+                select(ConversationFact).where(
+                    ConversationFact.session_id == sid,
+                    ConversationFact.field == "INTEREST_DETAIL",
+                    ConversationFact.current.is_(True),
+                )
+            )
+            is None
+        )
+
+
+def test_completion_requires_current_explicit_review(client, frozen, ai):
+    user = make_user()
+    sid = begin(client, user)["sessionId"]
+    early = client.post(f"{BASE}/{sid}/complete", headers=user["headers"], json={"profileRevision": 0})
+    assert early.status_code == 409 and early.json()["error"]["code"] == "FIRST_GREETING_NOT_READY"
+    review = filled(client, user, sid, ai)
+    assert review["status"] == "READY_TO_FINISH"
+    assert client.get("/api/v1/me", headers=user["headers"]).json()["user"]["needsFirstGreeting"]
+    stale = client.post(f"{BASE}/{sid}/complete", headers=user["headers"], json={"profileRevision": 0})
+    assert stale.status_code == 409
+    assert reply(client, user, sid, option="CONFIRM_PROFILE").status_code == 409
+    ai[0].append(output("수정할 이름을 알려줄래?"))
+    editing = reply(client, user, sid, option="EDIT_NICKNAME", question=review["nextInteraction"]["questionId"]).json()
+    assert editing["profileDraft"]["nickname"] == "별"
+    assert (
+        client.post(
+            f"{BASE}/{sid}/complete", headers=user["headers"], json={"profileRevision": review["profileRevision"]}
+        ).status_code
+        == 409
+    )
+    ai[0].append(
+        output(
+            "그럼 달이라고 부를게. 이 정보가 맞으면 확인 버튼을 눌러 줘.",
+            [change("nickname", "달")],
+            review=True,
+            summary="달은 공룡을 좋아해요.",
+        )
+    )
+    corrected = reply(client, user, sid, "달이라고 불러줘").json()
+    assert (
+        reply(client, user, sid, option="CONFIRM_PROFILE", question=review["nextInteraction"]["questionId"]).status_code
+        == 409
+    )
+    done = reply(
+        client, user, sid, option="CONFIRM_PROFILE", question=corrected["nextInteraction"]["questionId"], cmid="confirm"
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "COMPLETED"
+    assert done.json()["completion"]["profile"]["nickname"] == "달"
+    assert done.json()["completion"]["summary"] == "달은 공룡을 좋아해요."
+    assert done.json()["nextInteraction"] is None
+    assert reply(client, user, sid, option="CONFIRM_PROFILE", cmid="confirm").json() == done.json()
+    assert reply(client, user, sid, "또 이야기").status_code == 409
+    assert not client.get("/api/v1/me", headers=user["headers"]).json()["user"]["needsFirstGreeting"]
+    with next(db.get_session()) as session:
+        assert session.scalar(select(ChildProfile)).nickname == "달"
+
+
+def test_natural_language_end_does_not_implicitly_save_profile(client, frozen, ai):
+    user = make_user()
+    sid = begin(client, user)["sessionId"]
+    review = filled(client, user, sid, ai)
+    ai[0].append(
+        output(
+            "그럼 쉬었다 이야기하자. 저장하려면 내용을 확인하고 버튼을 눌러 줘.",
+            review=True,
+            summary="별은 공룡을 좋아해요.",
+            end="clear",
+        )
+    )
+    result = reply(client, user, sid, "이제 그만할래").json()
+    assert result["endIntentDetected"] and result["completion"] is None
+    done = client.post(
+        f"{BASE}/{sid}/complete", headers=user["headers"], json={"profileRevision": review["profileRevision"]}
+    )
+    assert done.status_code == 200, done.text
+    assert (
+        client.post(
+            f"{BASE}/{sid}/complete", headers=user["headers"], json={"profileRevision": review["profileRevision"]}
+        ).json()
+        == done.json()
+    )
+
+
+@pytest.mark.parametrize(
+    "reason", ["no_api_key", "ai_disabled", "child_data_mode_off", "daily_limit", "session_call_limit"]
+)
+def test_ai_block_does_not_create_fake_dialogue_or_extract(client, frozen, ai, monkeypatch, reason):
+    user = make_user()
+    sid = begin(client, user)["sessionId"]
+    monkeypatch.setattr(ai_gate, "budget", lambda *_: reason)
+    result = reply(client, user, sid, "나는 별이고 3학년이고 공룡을 좋아해")
+    assert result.status_code == 503
+    assert result.json()["error"]["details"]["reason"] == reason
+    restored = client.get(f"{BASE}/{sid}", headers=user["headers"]).json()
+    assert restored["profileDraft"] == empty_draft() and len(restored["messages"]) == 1
+    assert len(ai[1]) == 1
+
+
+def test_failed_start_and_failed_turn_are_retryable_without_duplicates(client, frozen, ai, monkeypatch):
+    user = make_user()
+    with monkeypatch.context() as patch:
+        patch.setattr(ai_gate, "budget", lambda *_: "ai_disabled")
+        assert client.post(BASE, headers=user["headers"]).status_code == 503
+    with next(db.get_session()) as session:
+        assert session.scalar(select(ConversationSession)) is None
+    sid = begin(client, user)["sessionId"]
+    ai[0].append(ai_gate.LlmError("timeout", "test"))
+    assert reply(client, user, sid, ALIEN, cmid="retry-me").status_code == 503
+    ai[0].append(output("반가워!", [change("nickname", "삐리빠라")]))
+    result = reply(client, user, sid, ALIEN, cmid="retry-me")
+    assert result.status_code == 200
+    detail = client.get(f"{BASE}/{sid}", headers=user["headers"]).json()
+    assert len(detail["messages"]) == 3
+    assert detail["profileDraft"]["nickname"] == "삐리빠라"
+
+
+@pytest.mark.parametrize(
+    "bad_change",
+    [
+        change("nickname", "없는이름", quote="원문에 없는 근거"),
+        change("nickname", "별", message_id="another-session"),
+        change("nickname", "별", operation="ADD"),
+        change("nickname", "이름" * 15),
+        change("schoolOrGroup", "햇살초등학교"),
+        change("interests", values=["하나", "둘", "셋", "넷", "다섯", "여섯"]),
+    ],
+)
+def test_invalid_ai_output_is_atomic_and_never_falls_back_to_rules(client, frozen, ai, bad_change):
+    user = make_user()
+    sid = begin(client, user)["sessionId"]
+    ai[0].append(output("이 결과는 표시되면 안 돼.", [change("gradeOrAgeBand", "3학년"), bad_change]))
+    res = reply(client, user, sid, "별이야 3학년이야")
+    assert res.status_code == 503 and res.json()["error"]["details"]["reason"] == "invalid_ai_output"
+    state = client.get(f"{BASE}/{sid}", headers=user["headers"]).json()
+    assert state["profileDraft"] == empty_draft() and len(state["messages"]) == 1
+
+
+def test_school_privacy_and_user_only_evidence(client, frozen, ai):
+    assert pii.mask("햇살초등학교 3학년", names=False, preserve_school_types=True).text == "●●● 초등학교 3학년"
+    assert pii.mask("초등학교", names=False, preserve_school_types=True).text == "초등학교"
+    user = make_user()
+    start = begin(client, user)
+    ai[0].append(output("알려 줘서 고마워.", [change("schoolOrGroup", "초등학교"), change("gradeOrAgeBand", "3학년")]))
+    result = reply(client, user, start["sessionId"], "햇살초등학교 3학년이야").json()
+    assert result["profileDraft"]["schoolOrGroup"] == "초등학교"
+    assert "햇살" not in json.dumps(ai[1][-1], ensure_ascii=False)
+    ai[0].append(
+        output(
+            "안 되는 결과",
+            [change("nickname", "티키", quote=start["messages"][0]["content"], message_id=start["messages"][0]["id"])],
+        )
+    )
+    assert reply(client, user, start["sessionId"], "응").status_code == 503
+
+
+def test_ownership_question_mismatch_and_input_safety(client, frozen, ai):
+    owner, other = make_user(), make_user()
+    sid = begin(client, owner)["sessionId"]
+    assert client.get(f"{BASE}/{sid}", headers=other["headers"]).status_code == 404
+    assert reply(client, other, sid, "안녕").status_code == 404
+    assert reply(client, owner, sid, "안녕", question="q-old").status_code == 409
+    assert reply(client, owner, sid, "대통령 선거 얘기 하자").status_code == 422
+    assert client.post(BASE).status_code == 401
+    with next(db.get_session()) as session:
+        assert session.scalar(select(SafetyEvent)).category == "politics"
+        assert len(list(session.scalars(select(ConversationMessage)))) == 1

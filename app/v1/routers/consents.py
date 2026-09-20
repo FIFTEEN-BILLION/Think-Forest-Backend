@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ... import clock
 from ...db import get_session
-from .. import cursor, idempotency, models_accounts
+from .. import cursor, guests, idempotency, models_accounts
 from ..cursor import iso
 from ..deps import CurrentUser, require_user, resolve_scope
 from ..errors import ApiError
@@ -75,6 +75,9 @@ def legal_documents(
 @router.get("/consents", response_model=ConsentListResponse)
 def list_consents(
     profile_id: str | None = Query(default=None, alias="profileId"),
+    current_only: bool = Query(
+        default=False, alias="currentOnly", description="현재 버전이며 철회되지 않은 동의만 페이지로 조회"
+    ),
     limit: int | None = Query(default=None, ge=1, le=50),
     page_cursor: str | None = Query(default=None, alias="cursor"),
     cu: CurrentUser = Depends(require_user),
@@ -88,6 +91,8 @@ def list_consents(
             .order_by(Consent.granted_at, Consent.id)
         )
     )
+    if current_only:
+        rows = [row for row in rows if consent_out(row).current]
     size = cursor.clamp_limit(limit)
     offset = cursor.decode_offset(page_cursor)
     has_more = offset + size < len(rows)
@@ -105,6 +110,13 @@ def create_consents(
     db: Session = Depends(get_session),
 ):
     """명세 26절 — 목적이 다른 동의를 버전별로 한 번에 기록한다. `agreed: false` 는 이미 한 동의를 철회한다."""
+    if cu.user.role == "GUEST":
+        if any(item.document_id not in guests.CONSENT_DOCUMENTS for item in req.items):
+            raise ApiError(403, "GUEST_RESTRICTED", "게스트는 개인정보와 AI 대화 동의만 관리할 수 있어요.")
+        if any(item.agreed for item in req.items) and not req.guardian_confirmed:
+            raise ApiError(403, "GUARDIAN_CONFIRMATION_REQUIRED", "보호자가 직접 확인하고 동의해 주세요.")
+        if any(item.agreed and not item.version for item in req.items):
+            raise ApiError(400, "INVALID_INPUT", "확인한 동의서의 버전이 필요해요.")
     replay = idempotency.replay(db, cu.id, idempotency_key, "POST /consents")
     if replay is not None:
         return replay
@@ -158,6 +170,8 @@ def revoke_consent(
     member = models_accounts.member_for(db, cu.user, consent.profile_id)
     if member is None:
         raise ApiError(404, "CONSENT_NOT_FOUND", "동의 기록을 찾을 수 없어요.", {"consentId": consent_id})
+    if cu.user.role == "GUEST" and consent.document_id not in guests.CONSENT_DOCUMENTS:
+        raise ApiError(403, "GUEST_RESTRICTED", "게스트는 개인정보와 AI 대화 동의만 관리할 수 있어요.")
     if "MANAGE_DATA" not in (member.permissions or []):
         message = "보호자 권한이 없어요."
         raise ApiError(403, "FORBIDDEN", message, {"profileId": consent.profile_id, "required": "MANAGE_DATA"})

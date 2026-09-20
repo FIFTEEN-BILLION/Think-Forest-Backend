@@ -16,6 +16,16 @@ TopicCategory = Literal["SCIENCE", "MATH", "HISTORY", "THINKING", "DAILY_LIFE", 
 # --- 메시지 공통 ---------------------------------------------------------------
 
 
+class GreetingReadinessResponse(CamelModel):
+    """현재 동의·서버 설정 검사. 실제 AI 공급자 상태나 사용량 잔여를 보장하지 않는다."""
+
+    available: bool = Field(description="현재 동의·AI 설정상 첫인사에 실제 AI를 사용할 수 있는지")
+    reason: Literal["guest_consent_required", "child_data_mode_off", "no_api_key", "ai_disabled"] | None = Field(
+        description="차단 사유. 사용 가능하면 null"
+    )
+    message: str | None = Field(description="사용자에게 표시할 안내. 사용 가능하면 null")
+
+
 class ChoiceOption(CamelModel):
     id: str
     label: str
@@ -89,6 +99,11 @@ class GreetingReadiness(CamelModel):
     missing: list[str]
 
 
+class GreetingProcessing(CamelModel):
+    mode: Literal["AI", "RULES"]
+    reason: str | None = None
+
+
 class GreetingSessionOut(CamelModel):
     session_id: str
     status: SessionStatus
@@ -98,6 +113,9 @@ class GreetingSessionOut(CamelModel):
     current_interaction: Interaction | None
     profile_draft: ProfileDraftOut
     readiness: GreetingReadiness
+    processing: GreetingProcessing | None = None
+    profile_revision: int = 0
+    deferred_fields: list[str] = Field(default_factory=list)
 
 
 class ProfileOut(CamelModel):
@@ -126,6 +144,14 @@ class GreetingMessageResponse(CamelModel):
     status: SessionStatus
     end_intent_detected: bool
     completion: GreetingCompletion | None = None
+    processing: GreetingProcessing | None = None
+    profile_revision: int = 0
+    deferred_fields: list[str] = Field(default_factory=list)
+
+
+class GreetingCompleteRequest(CamelModel):
+    trigger: Literal["BUTTON"] = "BUTTON"
+    profile_revision: int = Field(ge=0)
 
 
 # --- 티키와 이야기 -------------------------------------------------------------
@@ -389,18 +415,31 @@ GreetingField = Literal["NICKNAME", "GRADE_OR_AGE", "INTEREST", "INTEREST_DETAIL
 EndIntent = Literal["none", "clear", "unsure"]
 
 
+GreetingProfileField = Literal[
+    "nickname", "schoolOrGroup", "gradeOrAgeBand", "interests", "interestDetails", "growthGoal"
+]
+
+
+class GreetingEvidence(_Strict):
+    message_id: str
+    quote: str = Field(min_length=1, max_length=1000)
+
+
+class GreetingChange(_Strict):
+    field: GreetingProfileField
+    operation: Literal["SET", "ADD", "REMOVE", "CLEAR", "DEFER", "RESUME"]
+    value: str | None
+    values: list[str]
+    evidence: list[GreetingEvidence]
+
+
 class FirstGreetingLLM(_Strict):
-    nickname: str | None
-    grade: int | None
-    age: int | None
-    affiliation: Literal["elementary", "homeschool", "kindergarten", "other"] | None
-    interests: list[str]
-    interest_details: list[str]
-    growth_goal: str | None
+    message: str = Field(min_length=1, max_length=600)
+    changes: list[GreetingChange] = Field(max_length=20)
+    context_summary: str = Field(max_length=1600)
+    propose_review: bool
+    profile_summary: str | None = Field(max_length=600)
     end_intent: EndIntent
-    reaction: str
-    question: str
-    asked_field: GreetingField
 
 
 class ChoiceLLM(_Strict):

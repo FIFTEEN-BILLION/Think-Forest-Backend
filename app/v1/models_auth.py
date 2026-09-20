@@ -7,11 +7,21 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
 from .models import _now, prefixed_id
+
+
+class GuestRateLimit(Base):
+    """서버리스 인스턴스 사이에서도 공유하는 게스트 사용량. 원문 IP는 저장하지 않는다."""
+
+    __tablename__ = "guest_rate_limits"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    window: Mapped[datetime] = mapped_column(DateTime, primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class AuthIdentity(Base):
