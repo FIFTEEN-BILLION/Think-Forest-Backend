@@ -2,6 +2,9 @@
 
 from app.api_docs import EXAMPLES, OPERATIONS, TAGS
 from app.main import app
+from app.v1.models_accounts import DOCUMENT_BY_ID
+from app.v1.schemas_accounts import ConsentCreateRequest
+from app.v1.schemas_conversation import GreetingReadinessResponse
 
 
 def test_every_operation_has_korean_docs_and_tag():
@@ -26,3 +29,25 @@ def test_docs_do_not_list_removed_operations_and_examples_attach():
     assert set(EXAMPLES) <= live
     body = schema["paths"]["/talks/{talk_id}/turns"]["post"]["requestBody"]["content"]["application/json"]
     assert body["example"]["text"]
+
+
+def test_onboarding_contract_and_examples_match_public_openapi():
+    app.openapi_schema = None
+    schema = app.openapi()
+    guest = schema["paths"]["/api/v1/auth/guest"]["post"]
+    assert "requestBody" not in guest
+    assert guest["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/TokenResponse")
+    legal = schema["paths"]["/api/v1/legal-documents"]["get"]
+    assert not any(p["name"].lower() == "authorization" for p in legal.get("parameters", []))
+    consents = schema["paths"]["/api/v1/consents"]
+    parameter = next(p for p in consents["get"]["parameters"] if p["name"] == "currentOnly")
+    assert parameter["schema"]["default"] is False
+    example = consents["post"]["requestBody"]["content"]["application/json"]["example"]
+    request = ConsentCreateRequest.model_validate(example)
+    assert request.guardian_confirmed and {i.document_id for i in request.items} == {"privacy_child", "ai_conversation"}
+    assert all(i.agreed and i.version == DOCUMENT_BY_ID[i.document_id].version for i in request.items)
+    readiness = schema["paths"]["/api/v1/first-greeting/readiness"]["get"]["responses"]["200"]["content"]["application/json"]
+    assert readiness["schema"]["$ref"].endswith("/GreetingReadinessResponse")
+    for sample in readiness["examples"].values():
+        parsed = GreetingReadinessResponse.model_validate(sample["value"])
+        assert parsed.available == (parsed.reason is None)

@@ -42,6 +42,7 @@ def me(cu: CurrentUser = Depends(require_user), db: Session = Depends(get_sessio
 
     `profile` 은 기본 프로필(첫인사를 마친 경우), `profiles` 는 내가 만든 프로필 + 초대로 연결된 프로필이다.
     """
+    models_accounts.prepare_onboarding_profile(db, cu.user)
     profile = completed_profile(db, cu.user)
     members = models_accounts.active_members(db, cu.user)
     items = []

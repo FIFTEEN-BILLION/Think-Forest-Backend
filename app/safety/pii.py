@@ -42,7 +42,7 @@ class MaskResult:
     categories: list[str]  # 가려진 항목의 '종류'만
 
 
-def mask(text: str, *, names: bool = True) -> MaskResult:
+def mask(text: str, *, names: bool = True, preserve_school_types: bool = False) -> MaskResult:
     """names=False 는 별명을 일부러 받는 온보딩 대화에서만 쓴다."""
     if not text:
         return MaskResult(text=text, categories=[])
@@ -58,7 +58,23 @@ def mask(text: str, *, names: bool = True) -> MaskResult:
 
     # 순서 주의: 주소/학교를 먼저, 그다음 생년월일(6자리 숫자), 전화번호, 이름.
     _sub(_ADDRESS, "집주소", out)
-    _sub(_SCHOOL, "학교·기관명", out)
+    if preserve_school_types:
+
+        def mask_school(match: re.Match) -> str:
+            original = match.group(0)
+            kind = next(
+                k
+                for k in ("초등학교", "중학교", "고등학교", "유치원", "어린이집", "학원", "학교")
+                if original.endswith(k)
+            )
+            if original == kind:
+                return kind
+            categories.append("학교·기관명")
+            return f"{_MASK} {kind}"
+
+        out = _SCHOOL.sub(mask_school, out)
+    else:
+        _sub(_SCHOOL, "학교·기관명", out)
     _sub(_BIRTH, "생년월일", out)
     _sub(_PHONE, "전화번호", out)
 

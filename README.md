@@ -68,6 +68,13 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload
 
 Swagger 에는 전체 인증 버튼이 없습니다. 요청마다 있는 **`authorization`** 칸에 `Bearer 토큰` 을 넣습니다.
 
+**현재 웹·앱은 v1 API를 사용합니다.** `POST /api/v1/auth/guest` 또는 카카오 로그인으로 `jat_…` 토큰을 받고,
+`GET /api/v1/me`의 기본 `profiles[].id` → 공개 `legal-documents` → `consents` → `first-greeting/readiness` → 첫인사 순서로 진행합니다.
+게스트 동의 등록에는 문서 버전과 `guardianConfirmed:true`가 필요합니다. 첫인사는 AI 전용이며 사용 불가 시 폴백 없이 안내합니다.
+요청 예시와 오류는 `/docs` 상단의 **현재 웹·앱의 시작 흐름** 및 [게스트 안내](docs/guest-access.md)를 확인하세요.
+
+아래는 **기존 가족·아이 API**의 별도 사용 예입니다. v1 토큰과 혼용하지 않습니다.
+
 1. `POST /families` → `guardianToken`(`gt_…`) 복사 — **보호자 토큰**
 2. `POST /guardian/children` (`Bearer gt_…`) → body `{"nickname": "하늘", "tester": false}` → `id` 복사
 3. `POST /guardian/children/{child_id}/devices` → `childToken`(`ct_…`) 복사 — **아이 태블릿 토큰**

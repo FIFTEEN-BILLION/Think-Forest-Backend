@@ -25,6 +25,7 @@ from . import ai_gate, conversation_scope, report_prompts
 from .cursor import iso
 from .errors import ApiError
 from .models_conversation import ChildProfile, ConversationMessage, ConversationSession, StoryRecord
+from .models_library import WordbookEntry
 from .report_schemas import (
     ActivityCounts,
     CategoryCount,
@@ -75,10 +76,17 @@ def parse_day(raw: str | None, field: str) -> date | None:
 class Records:
     """한 기간의 원본 기록 모음. 진단이 아니라 개수와 인용만 들고 있다."""
 
-    def __init__(self, stories: list[StoryRecord], sessions: list[ConversationSession], messages: list):
+    def __init__(
+        self,
+        stories: list[StoryRecord],
+        sessions: list[ConversationSession],
+        messages: list,
+        words: list[WordbookEntry] | None = None,
+    ):
         self.stories = stories
         self.sessions = sessions
         self.messages = messages
+        self.words = words or []
 
     @property
     def source_version(self) -> str:
@@ -86,6 +94,7 @@ class Records:
         parts = [f"{s.id}:{s.version}:{s.updated_at.isoformat()}" for s in sorted(self.stories, key=lambda s: s.id)]
         parts.append(f"messages:{len(self.messages)}")
         parts.append(f"sessions:{len(self.sessions)}")
+        parts.append("words:" + ",".join(sorted(w.id for w in self.words)))
         return hashlib.sha256("|".join(parts).encode()).hexdigest()[:32]
 
     @property
@@ -138,7 +147,16 @@ def collect(db: Session, user_id: str, from_day: date, to_day: date, profile_id:
         if ids
         else []
     )
-    return Records(stories, sessions, messages)
+    words = list(
+        db.scalars(
+            select(WordbookEntry).where(
+                WordbookEntry.profile_id == profile.id if profile else WordbookEntry.user_id == user_id,
+                WordbookEntry.created_at >= start,
+                WordbookEntry.created_at < end,
+            )
+        )
+    )
+    return Records(stories, sessions, messages, words)
 
 
 def _dims(message) -> set[str]:
@@ -154,8 +172,7 @@ def counts(records: Records) -> tuple[ActivityCounts, ObservedBehaviors]:
         completed_stories=len(records.stories),
         # 기간 안에 이야기를 나눴지만 아직 끝내지 않은 대화.
         continued_stories=len([s for s in records.sessions if s.status in ("ACTIVE", "READY_TO_FINISH")]),
-        # 단어 보관함은 다른 트랙이 채운다. 아직 셀 기록이 없으므로 0.
-        new_words=0,
+        new_words=len(records.words),
     )
     observed = ObservedBehaviors(
         full_sentence_responses=len(said),

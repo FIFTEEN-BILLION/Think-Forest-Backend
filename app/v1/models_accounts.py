@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column, object_session
 
 from ..db import Base
@@ -192,6 +193,20 @@ def owner_permissions() -> list[str]:
     return list(ALL_PERMISSIONS)
 
 
+def prepare_onboarding_profile(db: Session, user: User) -> None:
+    """첫인사 전에도 동의할 대상이 필요하다. 완료 표시 없이 빈 프로필만 준비한다."""
+    if db.scalar(select(ChildProfile.id).where(ChildProfile.child_id == user.child_id)) is not None:
+        return
+    try:
+        with db.begin_nested():
+            db.add(ChildProfile(child_id=user.child_id, user_id=user.id))
+            db.flush()
+    except IntegrityError:
+        # 동시에 열린 탭에서 같은 아이의 프로필을 준비했다면 그 행을 사용한다.
+        if db.scalar(select(ChildProfile.id).where(ChildProfile.child_id == user.child_id)) is None:
+            raise
+
+
 def ensure_membership(db: Session, user: User) -> None:
     """기존 계정 이어받기 — 소속 행이 없으면 `users.child_id` 의 프로필을 기본 프로필로 만들어 준다.
 
@@ -203,17 +218,23 @@ def ensure_membership(db: Session, user: User) -> None:
     profile = db.scalar(select(ChildProfile).where(ChildProfile.child_id == user.child_id))
     if profile is None:
         return
-    db.add(
-        ProfileMember(
-            user_id=user.id,
-            profile_id=profile.id,
-            child_id=profile.child_id,
-            role="OWNER",
-            permissions=owner_permissions(),
-            is_default=True,
-        )
+    member = ProfileMember(
+        user_id=user.id,
+        profile_id=profile.id,
+        child_id=profile.child_id,
+        role="OWNER",
+        permissions=owner_permissions(),
+        is_default=True,
     )
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.add(member)
+            db.flush()
+    except IntegrityError:
+        if db.scalar(select(ProfileMember.id).where(
+            ProfileMember.user_id == user.id, ProfileMember.profile_id == profile.id,
+        )) is None:
+            raise
 
 
 def active_members(db: Session, user: User) -> list[ProfileMember]:
@@ -278,6 +299,27 @@ def child_has_ai_consent(child: Child) -> bool:
             return False
         consent = active_consent(db, profile.id, AI_CONVERSATION_DOCUMENT)
     return consent is not None and consent.actor_role == "GUARDIAN"
+
+
+def guest_needs_consent(child: Child) -> bool:
+    """게스트는 데이터 모드와 무관하게 두 동의가 현재 유효해야 실제 AI를 쓴다."""
+    from .guests import CONSENT_DOCUMENTS
+
+    db = object_session(child)
+    if db is None:
+        return False
+    with db.no_autoflush:
+        user = db.scalar(select(User).where(User.child_id == child.id, User.role == "GUEST"))
+        if user is None:
+            return False
+        profile = db.scalar(select(ChildProfile).where(ChildProfile.child_id == child.id))
+        if profile is None:
+            return True
+        for document_id in CONSENT_DOCUMENTS:
+            consent = active_consent(db, profile.id, document_id)
+            if consent is None or consent.actor_role != "GUARDIAN":
+                return True
+    return False
 
 
 def retention_default() -> int:

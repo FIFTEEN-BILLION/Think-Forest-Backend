@@ -12,7 +12,7 @@ from ..auth import ai_block_reason
 from ..models import Child
 from ..services import moderation, usage
 from ..services.llm import LlmError, call_structured
-from .models_accounts import child_has_ai_consent
+from .models_accounts import child_has_ai_consent, guest_needs_consent
 from .models_conversation import ConversationSession
 
 MAX_AI_CALLS_PER_SESSION = 60
@@ -24,6 +24,8 @@ __all__ = ["LlmError", "allowed", "block_reason", "budget", "call", "moderate"]
 
 def block_reason(child: Child) -> str | None:
     """막혔으면 사유 코드, 써도 되면 None. demo 모드는 테스터이거나 AI 대화 동의가 있을 때만 통과."""
+    if guest_needs_consent(child):
+        return "guest_consent_required"
     reason = ai_block_reason(child)
     if reason != CONSENT_UNLOCKS:
         return reason

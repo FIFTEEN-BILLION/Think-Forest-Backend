@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from conftest import auth, tick
 
-REDIRECT_URI = "https://jjcp.test/api/v1/auth/kakao/callback"
+REDIRECT_URI = "https://testserver/api/v1/auth/kakao/callback"
 WHOAMI = "/api/v1/_test/auth-whoami"
 
 
@@ -33,7 +33,6 @@ def use_settings(monkeypatch, **update):
     base = {
         "kakao_rest_api_key": "test-rest-key",
         "kakao_client_secret": "test-secret",
-        "kakao_redirect_uri": REDIRECT_URI,
         "kakao_app_id": None,
         "frontend_base_url": "",
         "auth_dev_login": False,
@@ -126,11 +125,41 @@ def test_authorize_sanitizes_return_to(monkeypatch, web, bad):
     assert session().scalars(select(OAuthState)).one().return_to == "/"
 
 
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "http://localhost:5173/auth/kakao/callback",
+        "https://preview.example.com/auth/kakao/callback",
+        "https://app.example.com/login/callback?source=kakao",
+    ],
+)
+def test_authorize_uses_frontend_redirect_without_server_configuration(monkeypatch, web, fake_kakao, redirect_uri):
+    use_settings(monkeypatch)
+    response = web.get("/api/v1/auth/kakao/authorize", params={"redirectUri": redirect_uri})
+    assert response.status_code == 302
+    query = parse_qs(urlsplit(response.headers["location"]).query)
+    assert query["redirect_uri"] == [redirect_uri]
+    exchanged = web.post(
+        "/api/v1/auth/kakao/exchange",
+        json={
+            "code": "code-a",
+            "state": query["state"][0],
+            "redirectUri": redirect_uri,
+        },
+    )
+    assert exchanged.status_code == 200, exchanged.text
+    assert fake_kakao["exchange"][0]["redirect_uri"] == redirect_uri
+
+
 def test_kakao_endpoints_return_503_when_not_configured(monkeypatch, web):
-    use_settings(monkeypatch, kakao_rest_api_key=None, kakao_redirect_uri=None)
+    use_settings(monkeypatch, kakao_rest_api_key=None)
     for res in (
         web.get("/api/v1/auth/kakao/authorize"),
         web.get("/api/v1/auth/kakao/callback", params={"code": "code-a", "state": "x"}),
+        web.post(
+            "/api/v1/auth/kakao/exchange",
+            json={"code": "code-a", "state": "x", "redirectUri": REDIRECT_URI},
+        ),
         web.post("/api/v1/auth/kakao/mobile", json={"platform": "IOS", "kakaoAccessToken": "kakao-token-1"}),
     ):
         assert res.status_code == 503
@@ -195,6 +224,56 @@ def test_callback_kakao_denied_and_bad_code(monkeypatch, web, fake_kakao):
     bad = web.get("/api/v1/auth/kakao/callback", params={"code": "bad-code", "state": start_web_login(web, "/b")})
     assert bad.headers["location"] == "/b?loginError=KAKAO_LOGIN_FAILED"
     assert "jjcp_refresh" not in set_cookies(bad)
+
+
+def test_frontend_code_exchange_returns_access_token_and_sets_refresh_cookie(monkeypatch, web, fake_kakao):
+    use_settings(monkeypatch)
+    state = start_web_login(web, "/talk?topicId=topic_a")
+    res = web.post(
+        "/api/v1/auth/kakao/exchange",
+        json={"code": "code-a", "state": state, "redirectUri": REDIRECT_URI},
+    )
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["accessToken"].startswith("jat_")
+    assert body["returnTo"] == "/talk?topicId=topic_a"
+    assert "refreshToken" not in body
+    assert web.get(WHOAMI, headers=auth(body["accessToken"])).json()["userId"] == body["user"]["id"]
+    cookie = set_cookies(res)["jjcp_refresh"]
+    for attr in ("httponly", "path=/api/v1/auth", "samesite=lax", "secure", "max-age=2592000"):
+        assert attr in cookie
+    exchange = fake_kakao["exchange"][0]
+    assert exchange["redirect_uri"] == REDIRECT_URI
+    assert exchange["client_secret"] == "test-secret"
+    assert exchange["code_verifier"]
+
+
+def test_frontend_code_exchange_passes_requested_redirect_and_checks_one_time_state(monkeypatch, web, fake_kakao):
+    use_settings(monkeypatch)
+    state = start_web_login(web, "/home")
+    ok = web.post(
+        "/api/v1/auth/kakao/exchange",
+        json={"code": "code-a", "state": state, "redirectUri": "https://preview.example.com/auth/kakao/callback"},
+    )
+    assert ok.status_code == 200
+    assert fake_kakao["exchange"][0]["redirect_uri"] == "https://preview.example.com/auth/kakao/callback"
+    reused = web.post(
+        "/api/v1/auth/kakao/exchange",
+        json={"code": "code-a", "state": state, "redirectUri": REDIRECT_URI},
+    )
+    assert reused.status_code == 400 and reused.json()["error"]["code"] == "INVALID_STATE"
+
+
+def test_frontend_code_exchange_rejects_bad_code(monkeypatch, web, fake_kakao):
+    use_settings(monkeypatch)
+    state = start_web_login(web, "/")
+    res = web.post(
+        "/api/v1/auth/kakao/exchange",
+        json={"code": "bad-code", "state": state, "redirectUri": REDIRECT_URI},
+    )
+    assert res.status_code == 401 and res.json()["error"]["code"] == "KAKAO_LOGIN_FAILED"
+    assert "jjcp_refresh" not in set_cookies(res)
 
 
 # ---------- 모바일 로그인 ----------

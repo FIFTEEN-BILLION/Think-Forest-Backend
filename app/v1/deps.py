@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, Query
+from fastapi import Depends, Header, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from .. import clock
 from ..auth import hash_token
 from ..db import get_session
 from ..models import Child
-from . import models_accounts, permissions
+from . import guests, models_accounts, permissions
 from .errors import ApiError
 from .models import AccessToken, User
 from .models_accounts import ProfileMember
@@ -29,7 +29,9 @@ class CurrentUser:
         return self.user.id
 
 
-def require_user(authorization: str | None = Header(default=None), db: Session = Depends(get_session)) -> CurrentUser:
+def require_user(
+    request: Request, authorization: str | None = Header(default=None), db: Session = Depends(get_session)
+) -> CurrentUser:
     if not authorization or not authorization.startswith("Bearer "):
         raise ApiError(401, "UNAUTHORIZED", "다시 로그인해 주세요.")
     raw = authorization.removeprefix("Bearer ").strip()
@@ -40,6 +42,8 @@ def require_user(authorization: str | None = Header(default=None), db: Session =
     child = db.get(Child, user.child_id) if user else None
     if user is None or child is None or user.status != "ACTIVE":
         raise ApiError(401, "UNAUTHORIZED", "다시 로그인해 주세요.")
+    if user.role == "GUEST":
+        guests.check_access(db, user, request.scope["route"].path, request.method)
     return CurrentUser(user=user, child=child)
 
 

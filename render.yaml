@@ -44,8 +44,6 @@ services:
         sync: false
       - key: KAKAO_CLIENT_SECRET
         sync: false
-      - key: KAKAO_REDIRECT_URI
-        sync: false
       - key: KAKAO_APP_ID
         sync: false
       # 푸시(Expo). 비우면 앱 내 알림만 기록하고 푸시는 보내지 않는다.
