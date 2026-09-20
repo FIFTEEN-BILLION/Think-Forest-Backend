@@ -1,26 +1,60 @@
-"""공용 픽스처 — 테스트마다 빈 메모리 DB, 고정 시계, 가족·아이 토큰."""
+"""공용 픽스처 — 테스트마다 빈 DB, 고정 시계, 가족·아이 토큰."""
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from app import clock, db
 from app.main import app
 from app.services import usage
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import close_all_sessions
+from sqlalchemy.schema import CreateSchema, DropSchema
 
 
 @pytest.fixture(autouse=True)
 def fresh_db():
-    engine = db.configure("sqlite://")
     from app import models  # noqa: F401 — 테이블 등록
     from app.v1 import tables  # noqa: F401 — v1 테이블 등록
 
-    db.Base.metadata.create_all(engine)
-    usage.reset()
-    yield
-    db.Base.metadata.drop_all(engine)
+    # DATABASE_URL은 사용하지 않는다. PostgreSQL 검증은 명시적인 테스트 URL과
+    # 매 테스트마다 생성한 전용 스키마에서만 실행하며 public의 테이블은 건드리지 않는다.
+    test_url = os.environ.get("TEST_POSTGRES_URL")
+    admin = None
+    schema = None
+    if test_url:
+        url = make_url(test_url)
+        if url.drivername != "postgresql+psycopg":
+            raise ValueError("TEST_POSTGRES_URL must use postgresql+psycopg")
+        admin = create_engine(url, connect_args={"prepare_threshold": None})
+        schema = "test_" + uuid4().hex
+        with admin.begin() as connection:
+            connection.execute(CreateSchema(schema))
+        scoped_url = url.update_query_dict({"options": f"-csearch_path={schema}"})
+        engine = db.configure(scoped_url.render_as_string(hide_password=False))
+    else:
+        engine = db.configure("sqlite://")
+    try:
+        db.Base.metadata.create_all(engine)
+        usage.reset()
+        yield
+    finally:
+        close_all_sessions()
+        if admin is not None:
+            engine.dispose()
+            try:
+                with admin.begin() as connection:
+                    connection.execute(DropSchema(schema, cascade=True))
+            finally:
+                admin.dispose()
+        else:
+            db.Base.metadata.drop_all(engine)
+            engine.dispose()
 
 
 @pytest.fixture
