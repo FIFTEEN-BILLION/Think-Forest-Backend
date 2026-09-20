@@ -39,6 +39,10 @@ def configure(url: str | None = None) -> Engine:
     else:
         # Supabase 등 원격 Postgres — 서버리스 콜드 스타트 사이 끊긴 커넥션을 재사용하지 않도록 확인 후 사용
         kwargs["pool_pre_ping"] = True
+        # Supabase PgBouncer(transaction 모드)는 커넥션마다 다른 백엔드로 라우팅한다.
+        # psycopg3 가 자동으로 만드는 server-side prepared statement 이름("_pg3_0" 등)이
+        # 다른 세션의 것과 충돌해 DuplicatePreparedStatement 를 낸다 — prepare 를 꺼서 회피.
+        kwargs["connect_args"] = {"prepare_threshold": None}
     _engine = create_engine(url, **kwargs)
     _factory = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
