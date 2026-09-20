@@ -58,6 +58,29 @@ uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload
 - 로컬 DB: `DATABASE_URL`을 비우거나 공백으로 두면 `backend/data/thinkforest.db`(SQLite)를 사용합니다. 상대 SQLite 경로는 실행 위치와 관계없이 백엔드 폴더를 기준으로 해석합니다. Git 에는 올라가지 않습니다. 기존 로컬 구현의 DB를 사용한다면 [develop 통합 기록과 이관 필요 사항](./INTEGRATION_NOTES.md)을 먼저 확인합니다.
 - 검사: `ruff check . && pytest`
 
+### PostgreSQL 호환성 검사
+
+기본 `pytest`는 SQLite 메모리 DB를 사용합니다. 배포 DB와 같은 PostgreSQL로 홈·커뮤니티·게스트 첫인사를
+검증하려면 테스트 전용 PostgreSQL에 연결한 뒤 아래처럼 실행합니다(PowerShell).
+
+```powershell
+$env:TEST_POSTGRES_URL = 'postgresql+psycopg://test_user:test_password@127.0.0.1:5432/test_db'
+$env:OPENAI_API_KEY = ''
+$env:ANTHROPIC_API_KEY = ''
+$env:TYPECAST_API_KEY = ''
+$env:KAKAO_REST_API_KEY = ''
+$env:CHILD_DATA_MODE = 'demo'
+$env:DEBUG_MODE = 'false'
+$env:AUTH_DEV_LOGIN = 'false'
+python -m pytest tests/test_screen_integration.py tests/test_v1_topics_home_stories.py tests/test_v1_social.py tests/test_guest_greeting_consent.py tests/test_v1_guests.py
+Remove-Item Env:TEST_POSTGRES_URL
+```
+
+테스트마다 임의 이름의 전용 스키마를 만들고 종료 시 해당 스키마만 제거합니다. 테스트 계정에는 스키마 생성 권한이
+필요하며, 운영 `DATABASE_URL`을 자동으로 가져오지 않습니다. AI 호출은 모의 응답으로 검증합니다.
+홈과 커뮤니티의 보호자 권한은 JSON 배열의 정확한 값으로 검사하며, PostgreSQL에서 지원되지 않는 JSON `LIKE`를
+사용하지 않습니다. 이 수정은 테이블 구조나 API 요청·응답 형식을 바꾸지 않습니다.
+
 > Python 3.10 이상에서 동작합니다(CI 는 3.11).
 
 ---

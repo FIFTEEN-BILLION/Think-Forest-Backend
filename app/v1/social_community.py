@@ -53,24 +53,29 @@ def matches_filter(public: PublicStory, wanted: str, my_band: str, my_categories
     return reason_for(public, my_band, my_categories, top_count) == REASONS[wanted]
 
 
-def audience_scope(cu: CurrentUser):
+def audience_scope(db: Session, cu: CurrentUser):
+    # JSON.contains()는 PostgreSQL에서도 문자열 LIKE로 변환되어 조회가 실패한다.
+    # 현재 계정의 소속만 읽고, JSON 배열의 정확한 권한 값을 검사한다.
+    members = db.scalars(
+        select(ProfileMember).where(ProfileMember.user_id == cu.id, ProfileMember.revoked_at.is_(None))
+    )
+    readable_profiles = [
+        member.profile_id
+        for member in members
+        if member.role == "OWNER" or "VIEW_STORIES" in (member.permissions or [])
+    ]
     shared = (
         select(StoryRecord.id)
         .join(ConversationOwner, ConversationOwner.session_id == StoryRecord.session_id)
         .join(ChildProfile, ChildProfile.child_id == ConversationOwner.child_id)
-        .join(ProfileMember, ProfileMember.profile_id == ChildProfile.id)
-        .where(
-            ProfileMember.user_id == cu.id,
-            ProfileMember.revoked_at.is_(None),
-            or_(ProfileMember.role == "OWNER", ProfileMember.permissions.contains("VIEW_STORIES")),
-        )
+        .where(ChildProfile.id.in_(readable_profiles))
     )
     return or_(PublicStory.audience == "PEERS", PublicStory.author_user_id == cu.id, PublicStory.story_id.in_(shared))
 
 
 def visible(db: Session, cu: CurrentUser, public_story_id: str) -> PublicStory:
     """공개된 것만 보인다. 없는 id·숨긴 이야기는 똑같이 404(존재 여부를 알려 주지 않는다)."""
-    public = db.scalar(select(PublicStory).where(PublicStory.id == public_story_id, audience_scope(cu)))
+    public = db.scalar(select(PublicStory).where(PublicStory.id == public_story_id, audience_scope(db, cu)))
     if public is not None:
         request = db.get(ShareRequest, public.share_request_id)
         if request is not None:
@@ -94,7 +99,7 @@ def recommended_ids(db: Session, cu: CurrentUser, ids: list[str]) -> set[str]:
 def page(
     db: Session, cu: CurrentUser, *, category: str | None, wanted: str | None, after: tuple | None, size: int
 ) -> tuple[list, bool]:
-    stmt = select(PublicStory).where(PublicStory.status == "PUBLISHED", audience_scope(cu))
+    stmt = select(PublicStory).where(PublicStory.status == "PUBLISHED", audience_scope(db, cu))
     if category:
         stmt = stmt.where(PublicStory.category == category)
     if after:

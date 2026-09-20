@@ -74,6 +74,33 @@ def test_new_regular_account_can_consent_before_greeting_and_keeps_same_profile(
     assert len(browser.get(f"{BASE}/consents?profileId={profile['id']}&currentOnly=true", headers=headers).json()["items"]) == 2
 
 
+@pytest.mark.parametrize("role", ["GUEST", "GUARDIAN"])
+def test_home_and_community_load_after_first_greeting(browser, frozen, ai, role):
+    if role == "GUEST":
+        _, headers, me = enter(browser)
+    else:
+        headers = make_user(role=role)["headers"]
+        me = browser.get(f"{BASE}/me", headers=headers).json()
+    profile_id = next(profile["id"] for profile in me["profiles"] if profile["isDefault"])
+    assert grant(browser, headers, profile_id).status_code == 201
+    user = {"headers": headers}
+    start = begin(browser, user)
+    review = filled(browser, user, start["sessionId"], ai)
+    done = browser.post(
+        f"{GREETING}/{start['sessionId']}/complete", headers=headers,
+        json={"profileRevision": review["profileRevision"]},
+    )
+    assert done.status_code == 200, done.text
+    home = browser.get(f"{BASE}/home", headers=headers)
+    assert home.status_code == 200, home.text
+    assert home.json()["profile"] == {"nickname": "별", "needsFirstGreeting": False}
+    assert home.json()["recommendations"]
+    assert home.json()["communityStories"] == []
+    community = browser.get(f"{BASE}/community/stories", headers=headers)
+    assert community.status_code == 200, community.text
+    assert community.json()["items"] == []
+
+
 def test_requires_guardian_confirmation_current_versions_and_own_profile(browser, ai):
     token, headers, me = enter(browser)
     profile = me["profile"]["id"]

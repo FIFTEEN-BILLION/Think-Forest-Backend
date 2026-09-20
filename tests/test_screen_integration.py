@@ -272,6 +272,8 @@ def test_local_migration_preserves_legacy_rows_and_is_repeatable(tmp_path):
 
 
 def test_family_public_copy_is_not_visible_to_unrelated_accounts(client, frozen):
+    from app import clock
+    from app.v1.models_accounts import ProfileMember
     from app.v1.models_social import PublicStory
 
     from test_v1_library import complete_story
@@ -294,5 +296,49 @@ def test_family_public_copy_is_not_visible_to_unrelated_accounts(client, frozen)
     assert client.get("/api/v1/community/stories", headers=stranger["headers"]).json()["items"] == []
     assert client.get("/api/v1/home", headers=stranger["headers"]).json()["communityStories"] == []
     assert client.get("/api/v1/community/stories/pub_family", headers=owner["headers"]).status_code == 200
-    link_guardian(client, owner, stranger, owner["profile_id"], ["VIEW_STORIES"])
+    link = link_guardian(client, owner, stranger, owner["profile_id"], ["VIEW_STORIES"])
     assert client.get("/api/v1/community/stories/pub_family", headers=stranger["headers"]).status_code == 200
+    assert client.get("/api/v1/home", headers=stranger["headers"]).json()["communityStories"] == [
+        {"id": "pub_family", "title": "가족에게만"}
+    ]
+
+    # 부분 문자열이나 LIKE 와일드카드가 비슷한 권한을 허용하면 안 된다.
+    for permissions in (["VIEW_PROFILE"], ["PREVIEW_STORIES"], ["VIEWXSTORIES"], []):
+        with next(db.get_session()) as session:
+            session.get(ProfileMember, link["id"]).permissions = permissions
+            session.commit()
+        assert client.get("/api/v1/community/stories/pub_family", headers=stranger["headers"]).status_code == 404
+        assert client.get("/api/v1/community/stories", headers=stranger["headers"]).json()["items"] == []
+        assert client.get("/api/v1/home", headers=stranger["headers"]).json()["communityStories"] == []
+
+    with next(db.get_session()) as session:
+        member = session.get(ProfileMember, link["id"])
+        member.permissions = ["VIEW_STORIES"]
+        member.revoked_at = clock.now()
+        session.commit()
+    assert client.get("/api/v1/community/stories/pub_family", headers=stranger["headers"]).status_code == 404
+    assert client.get("/api/v1/home", headers=stranger["headers"]).json()["communityStories"] == []
+
+
+def test_home_and_community_do_not_apply_string_operators_to_json(client, frozen):
+    """SQLite가 허용해 버리는 JSON LIKE를 막아 PostgreSQL 배포 회귀를 검출한다."""
+    from sqlalchemy import JSON, event
+    from sqlalchemy.sql import operators, visitors
+    from sqlalchemy.sql.elements import BinaryExpression
+
+    user = make_user()
+    rejected = {operators.contains_op, operators.like_op, operators.ilike_op}
+
+    def check_query(conn, clause, multiparams, params, execution_options):
+        for part in visitors.iterate(clause):
+            if isinstance(part, BinaryExpression) and isinstance(part.left.type, JSON):
+                assert part.operator not in rejected, "PostgreSQL does not support JSON LIKE"
+
+    engine = db.engine()
+    event.listen(engine, "before_execute", check_query)
+    try:
+        for endpoint in ("home", "community/stories"):
+            response = client.get(f"/api/v1/{endpoint}", headers=user["headers"])
+            assert response.status_code == 200, response.text
+    finally:
+        event.remove(engine, "before_execute", check_query)
