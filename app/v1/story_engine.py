@@ -65,6 +65,10 @@ MOVE_DIMENSION = {
 FIXED_CHOICE_MOVES = ("reflect_choice", "confirm_end")
 NO_OPTION_MOVES = ("reason", "reflect_why", "tail")
 REFLECT_OPTIONS = [{"id": "KEPT", "label": "처음 생각 그대로야"}, {"id": "CHANGED", "label": "생각이 조금 바뀌었어"}]
+SUPPORT_OPTIONS = [
+    {"id": "SUPPORT_HINT", "label": "힌트 더 보기"},
+    {"id": "SUPPORT_RETRY", "label": "다시 생각해 볼래"},
+]
 # 기존 이야기 플롯(talks/plot.py) 장면 제목을 쓰려고 v1 질문 종류를 기존 종류로 옮긴다.
 PLOT_MOVE = {
     "experience": "connect",
@@ -260,6 +264,29 @@ def _match_option(text: str, options: list[dict]) -> dict | None:
     return None
 
 
+def support_interaction(topic: dict, current: dict, pending: str) -> tuple[str, dict]:
+    """주제에 저장된 단서만 단계적으로 보여 준다. 도움 버튼은 학습 응답이 아니다."""
+    level = int(current.get("helpLevel", 0))
+    hints = [chat.safe_line(fact, 180) for fact in topic.get("facts", [])]
+    hints = [hint for hint in hints if hint]
+    if level < len(hints):
+        hint = f"힌트를 하나 볼까? {hints[level]}"
+    elif hints:
+        hint = "지금 바로 답이 떠오르지 않아도 괜찮아. 위의 힌트를 천천히 다시 살펴보자."
+    else:
+        hint = "큰 질문을 작게 나눠 보자. 이야기 속에서 익숙한 물건이나 장면부터 떠올려 봐."
+    content = f"모르는 건 괜찮아. {hint} 생각이 떠오르면 편하게 말해 줘."
+    data = chat.interaction(
+        "support", content, SUPPORT_OPTIONS,
+        resumeMove=pending,
+        resumePrompt=current.get("resumePrompt", current.get("prompt", "")),
+        resumeOptions=current.get("resumeOptions", current.get("options", [])),
+        meaning=current.get("meaning"),
+        helpLevel=level + 1,
+    )
+    return content, data
+
+
 # --- 직렬화 ---------------------------------------------------------------------
 
 
@@ -302,11 +329,16 @@ def summary_out(session: ConversationSession) -> ConversationSummary:
 
 def story_out(story: StoryRecord) -> StoryOut:
     journey = story.thought_journey or {}
+    body = story.body
+    # 이전 자동 정리본과 정확히 같은 경우만 읽기용 문단으로 정돈한다.
+    # 직접 고친 본문 및 저장 데이터·버전은 바꾸지 않는다.
+    if body == _legacy_body(story.topic_title, journey):
+        body = _body(story.topic_title, journey)
     return StoryOut(
         id=story.id,
         title=story.title,
         summary=story.summary,
-        body=story.body,
+        body=body,
         thought_journey=ThoughtJourney(
             initial_idea=journey.get("initialIdea", ""),
             evidence=list(journey.get("evidence", [])),
@@ -375,12 +407,16 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
     current, option_id, raw = chat.resolve_input(session, req)
     current = current or {}
     pending = current.get("move")
+    in_support = pending == "support"
+    if in_support:
+        pending = current.get("resumeMove") or "idea"
     options = current.get("options") or []
+    check = check_sentence(raw)
     if option_id:
         masked = raw
     else:
         masked = chat.screen(db, cu, raw, allow_personal_info=False, names=True)[0]
-        if options and (matched := _match_option(raw, options)) and not check_sentence(raw).ok:
+        if options and check.reason != "unsure" and (matched := _match_option(raw, options)) and not check.ok:
             option_id = matched["id"]  # "응 봤어"처럼 짧게 글로 고른 경우
 
     now = clock.now()
@@ -391,15 +427,18 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
     topic = session.topic or {}
 
     end = chat.end_intent(raw) if req.input.type == "TEXT" else "none"
+    help_action = option_id if in_support and option_id in {o["id"] for o in SUPPORT_OPTIONS} else None
+    needs_support = (not option_id and check.reason == "unsure") or help_action == "SUPPORT_HINT"
     continued = False
-    if pending == "confirm_end" and option_id:
+    if needs_support or help_action:
+        valid, found = False, set()
+    elif pending == "confirm_end" and option_id:
         end, continued = ("clear" if option_id == "END" else "none"), option_id == "CONTINUE"
         valid, found = False, set()
     elif option_id:
         valid = True
         found = {MOVE_DIMENSION[pending]} if pending in ("experience", "idea", "alternative") else set()
     else:
-        check = check_sentence(raw)
         valid = check.ok and end == "none"
         found = rule_dimensions(raw, pending, covered_before) if valid else set()
 
@@ -421,7 +460,7 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
     # 다음 질문 종류(결정론). 문장이 아니면 같은 질문을 다시 묻는다. 끝낼지 확인 중이었으면 그 전 질문으로 돌아간다.
     retry = not valid and not option_id and end == "none"
     move = (current.get("resumeMove") if pending == "confirm_end" else pending) or "idea"
-    if not retry and not continued and end == "none":
+    if not retry and not continued and not help_action and end == "none":
         state["validResponses"] += 1
         move = plan_move(
             covered, pending, option_id, _is_ready({**state, "covered": list(covered)}, session.active_seconds), extra
@@ -489,6 +528,13 @@ def handle_message(db: Session, cu: CurrentUser, session: ConversationSession, r
     elif end == "unsure":
         content = "조금 쉬고 싶어? 오늘은 여기까지 할지 골라 줘."
         next_data = chat.interaction("confirm_end", content, chat.END_OPTIONS, resumeMove=move)
+    elif needs_support:
+        content, next_data = support_interaction(topic, current, move)
+    elif help_action == "SUPPORT_RETRY":
+        question = current.get("resumePrompt") or question_for(move, topic, meaning)[0]
+        opts = current.get("resumeOptions") or []
+        content = f"좋아, 천천히 생각해 보자. {question}"
+        next_data = chat.interaction(move, question, opts, meaning=meaning)
     elif retry:
         content = EXPAND_LINES[check.reason or "too_short"]
         next_data = {**current, "questionId": current.get("questionId") or chat.new_question_id()}
@@ -558,17 +604,38 @@ def _said(quote: str) -> str:
     return f"“{quote}”{'이라고' if has_batchim(quote) else '라고'}"
 
 
-def _body(topic_title: str, journey: dict) -> str:
+def _legacy_body(topic_title: str, journey: dict) -> str:
     lines = [f"‘{topic_title}’ 이야기를 나눴어요."]
-    if journey["initialIdea"]:
+    if journey.get("initialIdea"):
         lines.append(f"처음에는 {_said(journey['initialIdea'])} 생각했어요.")
-    if journey["evidence"]:
+    if journey.get("evidence"):
         lines.append(f"그렇게 생각한 단서로 {_said(journey['evidence'][0])} 말했어요.")
-    if journey["alternatives"]:
+    if journey.get("alternatives"):
         lines.append(f"다른 경우도 떠올려 봤어요. “{journey['alternatives'][0]}”")
-    if journey["finalReflection"]:
+    if journey.get("finalReflection"):
         lines.append(f"마지막에는 {_said(journey['finalReflection'])} 정리했어요.")
     return " ".join(lines)
+
+
+def _body(topic_title: str, journey: dict) -> str:
+    """같은 발언을 여러 학습 차원에서 인용해도 본문에서는 한 번만 읽는다."""
+    lines = [f"‘{topic_title}’ 이야기를 나눴어요."]
+    seen: set[str] = set()
+
+    def add(quote: str, before: str, after: str) -> None:
+        key = re.sub(r"\s+", "", quote).rstrip(".!?~…")
+        if not key or key in seen:
+            return
+        seen.add(key)
+        lines.append(f"{before}{_said(quote)}{after}")
+
+    add(journey.get("initialIdea", ""), "처음에는 ", " 생각했어요.")
+    for quote in journey.get("evidence", []):
+        add(quote, "생각의 단서로 ", " 말했어요.")
+    for quote in journey.get("alternatives", []):
+        add(quote, "다른 경우도 떠올리며 ", " 말했어요.")
+    add(journey.get("finalReflection", ""), "마지막에는 ", " 정리했어요.")
+    return "\n\n".join(lines)
 
 
 def _ai_plot(cu: CurrentUser, session: ConversationSession, nickname: str | None, said: list[dict]) -> dict | None:

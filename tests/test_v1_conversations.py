@@ -186,8 +186,8 @@ def test_question_mismatch_and_short_answer_retry(client, frozen):
     short = say(client, user, conversation, text="몰라")
     assert short.status_code == 200
     body = short.json()
-    assert body["nextInteraction"]["questionId"] == before  # 같은 질문을 다시 묻는다
-    assert "문장" in body["assistantMessage"]["content"] or "헷갈리는지" in body["assistantMessage"]["content"]
+    assert body["nextInteraction"]["questionId"] != before  # 도움 요청에는 새 힌트와 도움 선택지를 준다
+    assert "힌트" in body["assistantMessage"]["content"]
     assert body["readiness"]["coveredDimensions"] == ["EXPERIENCE"]
     invalid = client.post(
         f"{BASE}/{conversation['id']}/messages",

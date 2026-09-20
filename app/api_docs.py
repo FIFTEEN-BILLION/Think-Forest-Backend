@@ -685,7 +685,11 @@ OPERATIONS.update(
         ("POST", "/api/v1/conversations/{conversation_id}/messages"): (
             "이야기 답변 보내기",
             "`input.type` 이 `TEXT` 면 `text`, `SINGLE_CHOICE` 면 `optionId`. `questionId` 가 지금 질문이 아니거나 선택지에 없는 `optionId` 면 "
-            "`409 QUESTION_MISMATCH`. 문장이 아닌 짧은 답은 같은 질문을 다시 묻습니다. `READY_TO_FINISH` 뒤에도 계속 보낼 수 있습니다.\n\n"
+            "`409 QUESTION_MISMATCH`. 일반적인 짧은 답은 같은 질문을 다시 묻습니다. "
+            "'잘 모르겠어'·'어려워' 같은 도움 요청에는 이유나 문장 늘리기를 요구하지 않고 주제 힌트를 줍니다. "
+            "`nextInteraction.options`의 `SUPPORT_HINT`(힌트 더 보기)·`SUPPORT_RETRY`(원래 질문 다시 생각하기)를 "
+            "일반 선택지처럼 보내거나 글로 바로 답할 수 있습니다. 도움 요청·힌트 버튼은 유효 응답 수나 학습 차원에 포함하지 않습니다. "
+            "`READY_TO_FINISH` 뒤에도 계속 보낼 수 있습니다.\n\n"
             "종료 발화가 준비된 대화에서 오면 같은 요청에서 정리본을 저장하고 `completion` 을 줍니다.",
             _V1C_TOKEN,
         ),
@@ -732,7 +736,9 @@ OPERATIONS.update(
         ),
         ("GET", "/api/v1/stories/{story_id}"): (
             "이야기 한 편",
-            "제목·요약·본문·생각 과정(`thoughtJourney`)·원본 대화 id. 다른 사람 이야기는 `404 STORY_NOT_FOUND`.",
+            "제목·요약·본문·생각 과정(`thoughtJourney`)·원본 대화 id. 다른 사람 이야기는 `404 STORY_NOT_FOUND`. "
+            "자동 정리 본문은 같은 인용의 반복을 줄이고 빈 줄로 문단을 나눕니다. 이전 자동 생성 양식과 정확히 일치하는 "
+            "본문도 조회 시 같은 방식으로 표시하며, 저장된 원문·버전과 사용자가 직접 고쳐 쓴 본문은 변경하지 않습니다.",
             _V1C_TOKEN,
         ),
         ("PUT", "/api/v1/stories/{story_id}/favorite"): ("아끼는 기록 등록", "여러 번 불러도 결과가 같습니다.", _V1C_TOKEN),
