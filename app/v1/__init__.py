@@ -18,6 +18,7 @@ from .routers import (
     consents,
     conversations,
     data_rights,
+    debug,
     first_greeting,
     guardian_links,
     home,
@@ -35,6 +36,7 @@ from .routers import (
 
 router = APIRouter(prefix="/api/v1")
 router.include_router(auth.router)
+router.include_router(debug.router)
 router.include_router(first_greeting.router)
 router.include_router(conversations.router)
 router.include_router(topics.router)

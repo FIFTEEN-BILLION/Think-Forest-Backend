@@ -26,14 +26,16 @@ from ... import clock
 from ...auth import hash_token
 from ...config import Settings, get_settings
 from ...db import get_session
+from ...models import Child
 from ...schemas.common import CamelModel
-from .. import kakao, profile_status
+from .. import guests, kakao, models_accounts, profile_status
 from ..accounts import ACCESS_TTL_SECONDS, create_account, issue_access_token
 from ..deps import CurrentUser, require_user
 from ..errors import ApiError, error_body
 from ..models import AccessToken, User
 from ..models_accounts import LoginIdempotency
 from ..models_auth import AuthIdentity, OAuthState, RefreshSession
+from ..models_conversation import ChildProfile
 
 router = APIRouter(prefix="/auth", tags=["v1-auth"])
 
@@ -63,6 +65,16 @@ class TokenResponse(CamelModel):
     refresh_token: str | None = None
     refresh_expires_in: int = REFRESH_TTL_SECONDS
     user: AuthUser
+
+
+class KakaoExchangeRequest(CamelModel):
+    code: str = Field(min_length=1, max_length=1024)
+    state: str = Field(min_length=1, max_length=256)
+    redirect_uri: str = Field(min_length=1, max_length=2048)
+
+
+class KakaoExchangeResponse(TokenResponse):
+    return_to: str
 
 
 class MobileDevice(CamelModel):
@@ -99,7 +111,10 @@ class DevLoginRequest(CamelModel):
 
 @router.get("/kakao/authorize", response_class=RedirectResponse, status_code=302)
 def kakao_authorize(
-    return_to: str = Query(default="/", alias="returnTo", max_length=2048), db: Session = Depends(get_session)
+    request: Request,
+    return_to: str = Query(default="/", alias="returnTo", max_length=2048),
+    redirect_uri: str | None = Query(default=None, alias="redirectUri", min_length=1, max_length=2048),
+    db: Session = Depends(get_session),
 ):
     settings = _kakao_settings()
     state = secrets.token_urlsafe(32)
@@ -116,7 +131,7 @@ def kakao_authorize(
     db.commit()
     url = kakao.authorize_url(
         client_id=settings.kakao_rest_api_key or "",
-        redirect_uri=settings.kakao_redirect_uri or "",
+        redirect_uri=redirect_uri or str(request.url_for("kakao_callback")),
         state=state,
         code_challenge=challenge,
     )
@@ -125,6 +140,7 @@ def kakao_authorize(
 
 @router.get("/kakao/callback", response_class=RedirectResponse, status_code=302)
 def kakao_callback(
+    request: Request,
     code: str | None = Query(default=None, max_length=1024),
     state: str | None = Query(default=None, max_length=256),
     error: str | None = Query(default=None, max_length=128),
@@ -151,7 +167,7 @@ def kakao_callback(
         kakao_token = kakao.exchange_code(
             client_id=settings.kakao_rest_api_key or "",
             client_secret=settings.kakao_client_secret,
-            redirect_uri=settings.kakao_redirect_uri or "",
+            redirect_uri=str(request.url_for("kakao_callback")),
             code=code,
             code_verifier=verifier,
         )
@@ -168,6 +184,52 @@ def kakao_callback(
     response = RedirectResponse(f"{settings.frontend_base_url}{return_to}", status_code=302)
     _set_refresh_cookie(response, refresh_raw, settings)
     return response
+
+
+# 프론트 콜백이 받은 인가 코드를 서버에서 교환한다. REST API 키와 Client Secret은
+# 브라우저 번들에 넣지 않으며, redirectUri는 프론트가 보낸 값을 카카오에 그대로 전달한다.
+@router.post("/kakao/exchange", response_model=KakaoExchangeResponse, response_model_exclude_none=True)
+def kakao_exchange(
+    req: KakaoExchangeRequest,
+    response: Response,
+    db: Session = Depends(get_session),
+) -> KakaoExchangeResponse:
+    settings = _kakao_settings()
+    now = clock.now()
+    saved = db.scalar(select(OAuthState).where(OAuthState.state_hash == hash_token(req.state)))
+    if saved is None or saved.used_at is not None or saved.expires_at <= now:
+        raise ApiError(400, "INVALID_STATE", "로그인 요청이 만료됐어요. 다시 시작해 주세요.")
+
+    # state와 인가 코드는 한 번만 쓴다. 외부 호출 전에 먼저 소모해 재전송을 막는다.
+    saved.used_at = now
+    verifier = saved.code_verifier
+    return_to = saved.return_to
+    db.commit()
+
+    try:
+        kakao_token = kakao.exchange_code(
+            client_id=settings.kakao_rest_api_key or "",
+            client_secret=settings.kakao_client_secret,
+            redirect_uri=req.redirect_uri,
+            code=req.code,
+            code_verifier=verifier,
+        )
+        kakao_user_id = kakao.get_user_id(kakao_token)
+    except kakao.KakaoError as exc:
+        if exc.code == "UNAVAILABLE":
+            raise _provider_unavailable() from None
+        raise ApiError(401, "KAKAO_LOGIN_FAILED", "카카오 로그인을 다시 해 주세요.") from None
+
+    user = _find_or_create_user(db, "KAKAO", kakao_user_id)
+    if user is None:
+        raise ApiError(401, "ACCOUNT_UNAVAILABLE", "다시 로그인해 주세요.")
+    refresh_raw, chain_id = _start_session(db, user, platform="WEB")
+    access = issue_access_token(db, user, refresh_session_id=chain_id)
+    token = _token_response(db, user, access, None)
+    body = KakaoExchangeResponse(**token.model_dump(), return_to=return_to)
+    db.commit()
+    _set_refresh_cookie(response, refresh_raw, settings)
+    return body
 
 
 # ---------- 모바일 로그인 ----------
@@ -230,6 +292,8 @@ def refresh_token(
     user = db.get(User, current.user_id) if current else None
     if current is None or user is None or user.status != "ACTIVE":
         return _refresh_failed(request, use_cookie, settings)
+    if user.role == "GUEST" and guests.seconds_left(user) <= 0:
+        return _refresh_failed(request, use_cookie, settings)
     if current.revoked_at is not None or current.expires_at <= now:
         return _refresh_failed(request, use_cookie, settings)
 
@@ -256,7 +320,7 @@ def refresh_token(
     body = _token_response(db, user, access, None if use_cookie else new_raw)
     db.commit()
     if use_cookie:
-        _set_refresh_cookie(response, new_raw, settings)
+        _set_refresh_cookie(response, new_raw, settings, max_age=body.refresh_expires_in)
     return body
 
 
@@ -287,6 +351,49 @@ def logout(
     db.commit()
     _clear_refresh_cookie(response, get_settings())
     return LogoutResponse()
+
+
+# ---------- 공개 게스트 체험 ----------
+
+
+@router.post("/guest", response_model=TokenResponse, response_model_exclude_none=True)
+def guest_login(
+    response: Response,
+    cookie_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
+    db: Session = Depends(get_session),
+) -> TokenResponse:
+    response.headers["Cache-Control"] = "no-store"
+    # 기존 브라우저 세션은 유지한다. 계정 ID/기기 키를 본문으로 받아 재사용하지 않는다.
+    current = db.scalar(select(RefreshSession).where(
+        RefreshSession.token_hash == hash_token(cookie_token),
+    )) if cookie_token else None
+    user = db.get(User, current.user_id) if current else None
+    if (current is not None and user is not None and user.status == "ACTIVE"
+            and current.revoked_at is None and current.rotated_at is None and current.expires_at > clock.now()
+            and (user.role != "GUEST" or guests.seconds_left(user) > 0)):
+        access = issue_access_token(db, user, refresh_session_id=current.chain_id)
+        body = _token_response(db, user, access, None)
+        db.commit()
+        return body
+
+    guests.consume(db, "start:global", 1000)
+    guests.purge_expired(db)
+    user = create_account(db, role="GUEST", nickname="체험 새싹")
+    child = db.get(Child, user.child_id)
+    assert child is not None
+    child.permissions = {"voice": False, "browse_shared": True, "publish_request": False}
+    db.add(ChildProfile(
+        user_id=user.id, child_id=user.child_id, nickname="체험 새싹",
+        interests=["과학", "상상"], completed_at=clock.now(),
+    ))
+    db.flush()
+    models_accounts.ensure_membership(db, user)
+    refresh_raw, chain_id = _start_session(db, user, platform="GUEST")
+    access = issue_access_token(db, user, refresh_session_id=chain_id)
+    body = _token_response(db, user, access, None)
+    db.commit()
+    _set_refresh_cookie(response, refresh_raw, get_settings(), max_age=body.refresh_expires_in)
+    return body
 
 
 # ---------- 개발용 로그인 ----------
@@ -324,7 +431,7 @@ def safe_return_to(value: str | None) -> str:
 
 def _kakao_settings() -> Settings:
     settings = get_settings()
-    if not (settings.kakao_rest_api_key and settings.kakao_redirect_uri):
+    if not settings.kakao_rest_api_key:
         raise _provider_unavailable()
     return settings
 
@@ -360,9 +467,7 @@ def _login_session(db: Session, user: User, key: str | None, *, platform: str) -
     if len(key) > 128:
         raise ApiError(400, "INVALID_INPUT", "입력 형식을 확인해 주세요.", {"fields": ["Idempotency-Key"]})
     now = clock.now()
-    record = db.scalar(
-        select(LoginIdempotency).where(LoginIdempotency.user_id == user.id, LoginIdempotency.key == key)
-    )
+    record = db.scalar(select(LoginIdempotency).where(LoginIdempotency.user_id == user.id, LoginIdempotency.key == key))
     if record is not None and record.expires_at > now:
         return _new_refresh(db, user, chain_id=record.chain_id, platform=platform), record.chain_id, True
     refresh_raw, chain_id = _start_session(db, user, platform=platform)
@@ -407,7 +512,9 @@ def _new_refresh(db: Session, user: User, *, chain_id: str, platform: str) -> st
             user_id=user.id,
             token_hash=hash_token(raw),
             platform=platform,
-            expires_at=clock.now() + timedelta(seconds=REFRESH_TTL_SECONDS),
+            expires_at=clock.now() + timedelta(
+                seconds=guests.seconds_left(user) if user.role == "GUEST" else REFRESH_TTL_SECONDS
+            ),
         )
     )
     db.flush()
@@ -436,9 +543,8 @@ def _token_response(db: Session, user: User, access: str, refresh: str | None) -
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
-        user=AuthUser(
-            id=user.id, role=user.role, needs_first_greeting=profile_status.needs_first_greeting(db, user)
-        ),
+        refresh_expires_in=guests.seconds_left(user) if user.role == "GUEST" else REFRESH_TTL_SECONDS,
+        user=AuthUser(id=user.id, role=user.role, needs_first_greeting=profile_status.needs_first_greeting(db, user)),
     )
 
 
@@ -446,8 +552,10 @@ def _cookie_kwargs(settings: Settings) -> dict:
     return {"path": COOKIE_PATH, "secure": settings.auth_cookie_secure, "httponly": True, "samesite": "lax"}
 
 
-def _set_refresh_cookie(response: Response, raw: str, settings: Settings) -> None:
-    response.set_cookie(COOKIE_NAME, raw, max_age=REFRESH_TTL_SECONDS, **_cookie_kwargs(settings))
+def _set_refresh_cookie(
+    response: Response, raw: str, settings: Settings, *, max_age: int = REFRESH_TTL_SECONDS
+) -> None:
+    response.set_cookie(COOKIE_NAME, raw, max_age=max_age, **_cookie_kwargs(settings))
 
 
 def _clear_refresh_cookie(response: Response, settings: Settings) -> None:

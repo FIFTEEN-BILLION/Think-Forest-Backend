@@ -4,8 +4,11 @@ from app import db
 from app.v1 import ai_gate
 from app.v1.models_library import WordbookEntry
 
+import test_v1_first_greeting
 from test_v1_accounts import link_guardian, new_profile
 from test_v1_activities import make_user, start
+
+ai = test_v1_first_greeting.ai
 
 
 def test_all_screen_read_endpoints(client, frozen):
@@ -108,11 +111,11 @@ def test_quiz_restore_hides_answers_and_is_owned(client, frozen):
     assert client.get(f"/api/v1/word-quizzes/{quiz['id']}", headers=make_user()["headers"]).status_code == 404
 
 
-def test_changing_default_does_not_resume_another_child_greeting(client, frozen):
+def test_changing_default_does_not_resume_another_child_greeting(client, frozen, ai):
     user = make_user()
-    first = client.post("/api/v1/first-greeting/sessions", headers=user["headers"]).json()
+    first = test_v1_first_greeting.begin(client, user)
     second = new_profile(client, user, "바다", makeDefault=True)
-    resumed = client.post("/api/v1/first-greeting/sessions", headers=user["headers"]).json()
+    resumed = test_v1_first_greeting.begin(client, user)
     assert first["sessionId"] != resumed["sessionId"]
     assert (
         client.get(f"/api/v1/first-greeting/sessions/{first['sessionId']}", headers=user["headers"]).status_code == 404

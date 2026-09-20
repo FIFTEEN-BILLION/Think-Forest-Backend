@@ -294,8 +294,19 @@ def test_link_permissions_are_enforced_and_unlink_keeps_data(client, frozen):
     )
     assert guardian_patch.status_code == 403  # MANAGE_DATA 가 없다
 
-    owner_link = next(row for row in client.get("/api/v1/guardian-links", headers=owner["headers"]).json()["items"] if row["role"] == "OWNER")  # noqa: E501
-    assert client.patch(f"/api/v1/guardian-links/{owner_link['id']}", json={"permissions": ["VIEW_PROFILE"]}, headers=owner["headers"]).status_code == 403  # noqa: E501
+    owner_link = next(
+        row
+        for row in client.get("/api/v1/guardian-links", headers=owner["headers"]).json()["items"]
+        if row["role"] == "OWNER"
+    )  # noqa: E501
+    assert (
+        client.patch(
+            f"/api/v1/guardian-links/{owner_link['id']}",
+            json={"permissions": ["VIEW_PROFILE"]},
+            headers=owner["headers"],
+        ).status_code
+        == 403
+    )  # noqa: E501
     assert client.delete(f"/api/v1/guardian-links/{owner_link['id']}", headers=owner["headers"]).status_code == 403
 
     unlinked = client.delete(f"/api/v1/guardian-links/{link['id']}", headers=owner["headers"])
@@ -323,7 +334,9 @@ def test_consents_are_versioned_and_actor_comes_from_the_login_account(client, f
     assert [doc["id"] for doc in documents] == [
         "privacy_child", "ai_conversation", "voice_retention", "community_share",
     ]  # fmt: skip
-    assert all(doc["draft"] is True and doc["locale"] == "ko-KR" and doc["version"] == "2026-09-18" for doc in documents)
+    assert all(
+        doc["draft"] is True and doc["locale"] == "ko-KR" and doc["version"] == "2026-09-18" for doc in documents
+    )
     assert "법률 검토 전 초안" in documents[0]["draftNotice"]
     assert client.get("/api/v1/legal-documents?locale=en-US", headers=owner["headers"]).status_code == 400
 
@@ -382,58 +395,59 @@ def test_consents_are_versioned_and_actor_comes_from_the_login_account(client, f
 
 def _with_openai_key(monkeypatch) -> None:
     """실제 키 없이 demo 모드 판정만 살린다(OpenAI 호출은 전부 가짜)."""
-    settings = get_settings().model_copy(update={"openai_api_key": "test-key"})
+    settings = get_settings().model_copy(update={"openai_api_key": "test-key", "child_data_mode": "demo"})
     monkeypatch.setattr(legacy_auth, "get_settings", lambda: settings)
 
 
-def test_ai_gate_follows_guardian_consent_and_never_breaks_the_chat(client, frozen, monkeypatch):
+def test_ai_gate_follows_guardian_consent_without_fabricating_dialogue(client, frozen, monkeypatch):
     _with_openai_key(monkeypatch)
-    calls: list[dict] = []
+    monkeypatch.setattr(ai_gate, "moderate", lambda *_: None)
+    calls = []
 
     def fake(**kwargs):
         calls.append(kwargs)
         return FirstGreetingLLM(
-            nickname="별", grade=2, age=None, affiliation="elementary", interests=["공룡"], interest_details=[],
-            growth_goal=None, end_intent="none", reaction="별이는 공룡을 좋아하는구나!",
-            question="어떤 공룡이 제일 좋고, 왜 좋아?", asked_field="INTEREST_DETAIL",
-        )  # fmt: skip
+            message="안녕! 어떤 이야기를 나누고 싶어?",
+            changes=[],
+            context_summary="",
+            propose_review=False,
+            profile_summary=None,
+            end_intent="none",
+        )
 
     monkeypatch.setattr(ai_gate, "call_structured", fake)
     user = account()
     profile = new_profile(client, user, "별", makeDefault=True)
-    session_id = client.post("/api/v1/first-greeting/sessions", headers=user["headers"]).json()["sessionId"]
-
-    tick(frozen, 20)
-    before = client.post(
-        f"/api/v1/first-greeting/sessions/{session_id}/messages",
-        json={"clientMessageId": "c1", "input": {"type": "TEXT", "text": "나는 별이라고 불러 줘. 2학년이야."}},
-        headers=user["headers"],
-    ).json()
-    assert before["assistantMessage"]["source"] == "fallback" and calls == []  # 동의 전에는 AI 를 쓰지 않는다
+    before = client.post("/api/v1/first-greeting/sessions", headers=user["headers"])
+    assert before.status_code == 503 and calls == []
+    assert before.json()["error"]["details"]["reason"] == "child_data_mode_off"
 
     consent = grant_consent(client, user, profile["id"], "ai_conversation")
-    tick(frozen, 20)
+    start = client.post("/api/v1/first-greeting/sessions", headers=user["headers"])
+    assert start.status_code == 200
+    sid = start.json()["sessionId"]
     after = client.post(
-        f"/api/v1/first-greeting/sessions/{session_id}/messages",
+        f"/api/v1/first-greeting/sessions/{sid}/messages",
         json={"clientMessageId": "c2", "input": {"type": "TEXT", "text": "공룡을 좋아해"}},
         headers=user["headers"],
-    ).json()
-    assert after["assistantMessage"]["source"] == "ai" and len(calls) == 1
-    assert after["assistantMessage"]["content"].startswith("별이는 공룡을 좋아하는구나!")
-
+    )
+    assert after.status_code == 200 and after.json()["assistantMessage"]["source"] == "ai"
+    assert len(calls) == 2
     client.delete(f"{CONSENTS}/{consent['id']}", headers=user["headers"])
-    tick(frozen, 20)
     revoked = client.post(
-        f"/api/v1/first-greeting/sessions/{session_id}/messages",
+        f"/api/v1/first-greeting/sessions/{sid}/messages",
         json={"clientMessageId": "c3", "input": {"type": "TEXT", "text": "티라노사우루스 이빨이 커서 좋아"}},
         headers=user["headers"],
-    ).json()
-    assert revoked["assistantMessage"]["source"] == "fallback" and len(calls) == 1
-    assert revoked["assistantMessage"]["content"]  # 대화는 끊기지 않는다
+    )
+    assert revoked.status_code == 503 and len(calls) == 2
+    detail = client.get(f"/api/v1/first-greeting/sessions/{sid}", headers=user["headers"]).json()
+    assert len(detail["messages"]) == 3
 
 
 def test_ai_gate_keeps_blocking_when_there_is_no_api_key(client, frozen, monkeypatch):
     """키가 없거나 AI 스위치가 꺼져 있으면 동의가 있어도 AI 를 쓰지 않는다."""
+    settings = get_settings().model_copy(update={"openai_api_key": ""})
+    monkeypatch.setattr(legacy_auth, "get_settings", lambda: settings)
     user = account()
     profile = new_profile(client, user, "별", makeDefault=True)
     grant_consent(client, user, profile["id"], "ai_conversation")

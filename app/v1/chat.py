@@ -209,7 +209,15 @@ def resolve_input(session: ConversationSession, req: MessageRequest) -> tuple[di
     return current, None, " ".join((req.input.text or "").split())
 
 
-def screen(db: Session, cu: CurrentUser, text: str, *, allow_personal_info: bool, names: bool) -> tuple[str, list[str]]:
+def screen(
+    db: Session,
+    cu: CurrentUser,
+    text: str,
+    *,
+    allow_personal_info: bool,
+    names: bool,
+    preserve_school_types: bool = False,
+) -> tuple[str, list[str]]:
     """민감 주제·금칙어(→ 422, 원문 저장 안 함) → 개인정보 가리기 → (AI 허용 시) Moderation.
 
     돌려주는 값: (가린 문장, 가린 항목 종류)
@@ -217,7 +225,7 @@ def screen(db: Session, cu: CurrentUser, text: str, *, allow_personal_info: bool
     flag = sensitive.detect(text)
     if flag and not (allow_personal_info and flag.category == "personal_info"):
         _unsafe(db, cu, flag.category, flag.escalate, flag.redirect)
-    masked = pii.mask(text, names=names)
+    masked = pii.mask(text, names=names, preserve_school_types=preserve_school_types)
     result = ai_gate.moderate(cu.child, masked.text)
     if result is not None and result.flagged:
         self_harm = any(c.startswith("self-harm") for c in result.categories)

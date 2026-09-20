@@ -12,7 +12,36 @@ from fastapi.openapi.utils import get_openapi
 DESCRIPTION = """
 초등 2~4학년(8~10살) 아이가 AI **생각 친구**와 대화하며 생각을 문장으로 말하고 넓히는 서비스의 API 입니다.
 
-## 5분 만에 직접 해 보기
+## 현재 웹·앱의 시작 흐름 (v1)
+현재 화면은 **`/api/v1`**을 사용합니다. 아래 기존 API의 `gt_`·`ct_` 토큰과 혼용하지 마세요.
+
+1. 카카오 로그인 또는 **`POST /api/v1/auth/guest`** → `accessToken`(`jat_…`)을 받습니다.
+   게스트는 본문·인증 없이 시작하며 refresh token은 HttpOnly 쿠키에만 저장합니다.
+2. **`GET /api/v1/me`** → `profiles`에서 `isDefault: true`인 항목의 `id`를 선택합니다.
+   신규 일반 계정도 동의 기록용 빈 프로필이 준비됩니다. 첫인사 전 `profile`은 null이고 `needsFirstGreeting`은 true입니다.
+3. **`GET /api/v1/legal-documents`**, **`GET /api/v1/consents?profileId=…&currentOnly=true`**로 문서와 현재 동의를 확인합니다.
+4. 보호자가 `privacy_child`, `ai_conversation` 내용을 각각 확인한 뒤 **`POST /api/v1/consents`**에
+   `profileId`, 문서별 `version`·`agreed: true`, `guardianConfirmed: true`를 보냅니다.
+   확인 값은 보호자의 자기 확인이며 신원·관계의 본인인증은 아닙니다. 동의서는 법률 검토 전 초안입니다.
+5. **`GET /api/v1/first-greeting/readiness`**의 `available`을 확인합니다. false면 `reason`·`message`를 표시합니다.
+   이 조회는 AI를 호출하거나 사용량을 소비하지 않습니다. 실제 생성 시 AI·사용량 조건을 다시 검사합니다.
+6. **`POST /api/v1/first-greeting/sessions`** → 답변 → 최신 프로필 확인 후 완료합니다.
+   프론트에서는 `/welcome` → `/first-talk` 순서이며 동의 전에는 AI 첫인사를 실행하지 않습니다.
+
+게스트는 최초 생성부터 24시간 뒤 만료하며 갱신으로 연장되지 않습니다. 다른 PC·브라우저 프로필의 기록은 분리됩니다.
+같은 브라우저의 탭은 쿠키를 공유합니다. 기본 체험을 선택해 동의를 보류할 수 있지만 AI 첫인사에는 두 동의가 필요합니다.
+일반 게스트는 성인 테스터로 등록되지 않으며, 음성·보호자 연결·공유 요청·내보내기·디버그 초기화는 제한됩니다.
+기록은 만료 후 신규 게스트 진입 시 순차 정리하며, 카카오 계정으로 이관하지 않습니다.
+
+### v1에서 확인할 오류
+- `403 GUARDIAN_CONFIRMATION_REQUIRED`: 게스트의 동의 등록에 보호자 직접 확인이 빠졌습니다.
+- `403 GUEST_RESTRICTED`, `429 GUEST_LIMIT_REACHED`: 게스트 허용 기능 또는 일일 이용량을 초과했습니다.
+- `401 GUEST_EXPIRED`: 게스트 체험이 만료됐습니다. refresh는 만료 시 `401 UNAUTHORIZED`입니다.
+- `409 VERSION_CONFLICT`: 현재 동의서를 다시 읽고 동의해야 합니다.
+- `503 AI_TEMPORARILY_UNAVAILABLE`: 첫인사 AI를 사용할 수 없습니다. `details.reason`·`retryable`을 확인하세요.
+  **첫인사에는 규칙 대사 폴백이 없습니다.** 기본 이야기 대화의 폴백 동작과 구분하세요.
+
+## 기존 가족·아이 API 직접 해 보기 (레거시)
 1. **`POST /families`** 실행 → 응답의 `guardianToken`(`gt_…`)을 복사합니다. *보호자 토큰*
 2. **`POST /guardian/children`** → `authorization` 칸에 `Bearer gt_…` 를 넣고 실행 → 응답의 `id` 복사
 3. **`POST /guardian/children/{child_id}/devices`** → 응답의 `childToken`(`ct_…`) 복사. *아이 태블릿 토큰*
@@ -21,7 +50,7 @@ DESCRIPTION = """
 
 > Swagger 상단에 전체 인증 버튼은 없습니다. 각 요청의 **`authorization`** 칸에 `Bearer 토큰` 을 직접 넣어 주세요.
 
-## 토큰 규칙
+## 기존 API 토큰 규칙
 | 경로 | 필요한 토큰 |
 |---|---|
 | `/guardian/...` | 보호자 토큰 `gt_…` |
@@ -29,14 +58,14 @@ DESCRIPTION = """
 | `/shares` (둘러보기·신고) | 보호자 또는 아이 토큰 |
 | `/families`, `/missions/...`, `/inquiry/...`, `/path/...`, 기존 체험 기능 | 토큰 없음 |
 
-## 응답에서 꼭 볼 필드
+## 기존 API 응답에서 볼 필드
 - **`ai`** — `true` 면 실제 AI(OpenAI `gpt-5.6-luna`)가 만든 문장, `false` 면 규칙 기반 대사입니다.
 - **`error`** — AI 를 못 쓴 이유. `no_api_key`(키 없음), `child_data_mode_off`(ZDR 승인 전이라 아이 문장을 AI 로 보내지 않음) 등.
 - **`accepted`** (대화) — 문장으로 인정되어 대화가 앞으로 나아갔는지. 단답이면 `false`.
 - **`move`** (대화) — 친구가 방금 던진 질문 종류. `tail` 꼬리질문 · `connect` 생활 연결 · `challenge` "진짜일까?" ·
   `imagine` 상상 · `reason_check` 생각 지키기/바꾸기 · `compose` 긴 문장으로 정리 · `continue` 이야기 완성 뒤 이어 가기
 
-## 자주 보는 오류
+## 기존 API에서 자주 보는 오류
 | 코드 | 뜻 |
 |---|---|
 | `401 missing_token` / `invalid_*_token` | `Bearer ` 를 빠뜨렸거나 토큰 종류가 다릅니다 |
@@ -101,8 +130,9 @@ TAGS: dict[str, tuple[str, str]] = {
     # --- v1 auth ---
     "v1-auth": (
         "12. JJCP v1 로그인",
-        "카카오 웹·모바일 로그인, JJCP access/refresh token 갱신·로그아웃, 개발용 로그인. 경로는 `/api/v1/auth/...`.",
+        "카카오 웹·모바일 로그인, 공개 게스트 체험, JJCP access/refresh token 갱신·로그아웃, 개발용 로그인. 경로는 `/api/v1/auth/...`.",
     ),
+    "v1-debug": ("개발 전용 초기화", "DEBUG_MODE=true일 때만 사용할 수 있는 현재 계정 데이터 초기화."),
     # --- /v1 auth ---
 }
 
@@ -388,19 +418,50 @@ OPERATIONS: dict[tuple[str, str], tuple[str, str, str]] = {
     ("GET", "/tech/panel"): ("기술·안전 패널", "AI 호출 수·지연·실패 코드와 차단 로그.", N),
     ("GET", "/health"): ("서버 켜짐 확인", "`{\"ok\": true}` 면 정상입니다.", N),
     # --- v1 auth ---
+    ("POST", "/api/v1/auth/guest"): (
+        "로그인 없이 게스트 체험 시작·복원",
+        "본문과 Bearer 인증 없이 호출합니다. 서버가 독립된 GUEST 계정·가족·아이·예시 프로필을 만들고 "
+        "access token을 반환합니다. refresh token은 HttpOnly 쿠키에만 저장하며 본문에는 포함하지 않습니다. "
+        "유효한 쿠키가 있으면 기존 계정을 유지하므로 일반 카카오 세션도 교체하지 않습니다. "
+        "클라이언트의 기기 키·계정 ID로 다른 게스트를 재사용하지 않습니다.\n\n"
+        "예시 프로필은 완료 상태여서 `needsFirstGreeting: false`지만 첫인사를 자발적으로 이용할 수 있습니다. "
+        "AI 이용에는 현재 개인정보·AI 동의가 모두 필요합니다. `is_tester`는 false입니다. "
+        "최초 생성부터 24시간 뒤 만료하고 refresh로 연장하지 않습니다. `refreshExpiresIn`은 남은 초입니다.\n\n"
+        "UTC 날짜별 신규 게스트 전체 1,000개, 변경 요청은 게스트별 300회·전체 10,000회입니다(429 GUEST_LIMIT_REACHED). "
+        "신규 진입 때 만료 계정을 최대 10개씩 정리하며 방문이 없으면 삭제가 지연됩니다. "
+        "운영 DB의 users.role 제약에 GUEST가 포함되어 있어야 합니다.",
+        N,
+    ),
     ("GET", "/api/v1/auth/kakao/authorize"): (
         "v1 웹 카카오 로그인 시작",
+        "프론트가 보낸 `redirectUri`를 카카오 인가 요청에 그대로 사용합니다. 생략하면 호환용 서버 콜백 주소를 사용합니다. "
         "`returnTo`(같은 출처 상대 경로, 아니면 `/`)를 기억하고 카카오 인가 화면으로 **302** 이동합니다. "
         "state(10분·1회용)와 PKCE(S256)를 씁니다.\n\n"
         "카카오 설정이 없으면 `503 AUTH_PROVIDER_UNAVAILABLE`. Swagger 에서는 리다이렉트를 따라가지 않으니 브라우저 주소창에서 여세요.",
         N,
     ),
     ("GET", "/api/v1/auth/kakao/callback"): (
-        "v1 웹 카카오 로그인 콜백",
+        "v1 웹 카카오 로그인 서버 콜백(호환용)",
         "카카오가 호출합니다. state 검증 → 토큰 교환 → 회원 찾기/만들기 → refresh token 을 HttpOnly 쿠키 "
         "`jjcp_refresh`(Path=/api/v1/auth, SameSite=Lax)에 넣고 `returnTo` 로 302 이동합니다.\n\n"
         "access token 은 주지 않습니다. 화면에서 `POST /api/v1/auth/token/refresh` 를 불러 받으세요. "
         "실패하면 `returnTo?loginError=INVALID_STATE|KAKAO_CANCELLED|KAKAO_LOGIN_FAILED|AUTH_PROVIDER_UNAVAILABLE` 로 이동합니다.",
+        N,
+    ),
+    ("POST", "/api/v1/debug/reset-account"): (
+        "디버그: 현재 계정 데이터 초기화",
+        "`DEBUG_MODE=true`에서만 동작합니다(꺼져 있으면 404). Bearer 토큰의 계정과 소유한 "
+        "아이 프로필·사용자 기록·로그인 연결·세션을 즉시 삭제하며, 기본 카탈로그와 다른 계정은 유지합니다. "
+        "본문은 `{}`입니다. 다른 계정과 공동 사용 중인 프로필/모임은 409 SHARED_DATA로 차단합니다. "
+        "성공하면 refresh 쿠키를 지우므로 클라이언트도 access token·캐시를 비우고 로그인 화면으로 이동해야 합니다.",
+        V1_ACCESS,
+    ),
+    ("POST", "/api/v1/auth/kakao/exchange"): (
+        "v1 웹 카카오 인가 코드 교환",
+        "프론트 콜백이 받은 `code`, `state`, `redirectUri`를 서버로 보냅니다. 서버는 redirectUri를 "
+        "환경변수와 비교하지 않고 카카오 토큰 교환에 그대로 전달합니다. state·PKCE와 회원 찾기/만들기는 유지합니다. "
+        "응답 본문에는 JJCP access token과 로그인 뒤 이동할 `returnTo`가 들어가며, refresh token은 "
+        "HttpOnly 쿠키에만 저장됩니다.",
         N,
     ),
     ("POST", "/api/v1/auth/kakao/mobile"): (
@@ -415,7 +476,8 @@ OPERATIONS: dict[tuple[str, str], tuple[str, str, str]] = {
         "refresh token 으로 새 access token(1시간)을 받습니다. refresh token 도 매번 새로 바뀝니다.\n\n"
         "- **웹**: 본문 없이 호출 → 쿠키 `jjcp_refresh` 사용, 새 쿠키로 교체, 본문에 `refreshToken` 없음\n"
         "- **모바일**: 본문 `refreshToken` → 본문에 새 `refreshToken`\n\n"
-        "이미 한 번 쓴 refresh token 을 다시 보내면 그 로그인 세션 전체가 폐기됩니다(`401`).",
+        "이미 한 번 쓴 refresh token 재사용은 `401`입니다. 회전 후 30초 유예를 넘긴 재사용이면 해당 세션 계열도 폐기합니다. "
+        "게스트는 최초 생성부터 24시간 만료를 유지하며 `refreshExpiresIn`은 남은 초입니다.",
         N,
     ),
     ("POST", "/api/v1/auth/logout"): (
@@ -507,13 +569,18 @@ EXAMPLES: dict[tuple[str, str], dict] = {
         "inputOrigin": "example",
     },
     # --- v1 auth ---
+    ("POST", "/api/v1/auth/kakao/exchange"): {
+        "code": "프론트_콜백이_받은_인가_코드",
+        "state": "인가_시작_응답의_state",
+        "redirectUri": "https://app.example.com/auth/kakao/callback",
+    },
     ("POST", "/api/v1/auth/kakao/mobile"): {
         "platform": "ANDROID",
         "kakaoAccessToken": "카카오_SDK_로그인으로_받은_access_token",
         "device": {"installationId": "01K0EXAMPLE", "appVersion": "1.0.0"},
     },
-    ("POST", "/api/v1/auth/token/refresh"): {"refreshToken": "jrt_… (웹은 비워 두면 쿠키를 씀)"},
-    ("POST", "/api/v1/auth/logout"): {"refreshToken": "jrt_… (웹은 생략)", "logoutFromKakao": False},
+    ("POST", "/api/v1/auth/token/refresh"): {},
+    ("POST", "/api/v1/auth/logout"): {"logoutFromKakao": False},
     ("POST", "/api/v1/auth/dev/login"): {"deviceKey": "my-laptop-test-01", "nickname": "테스터"},
     # --- /v1 auth ---
 }
@@ -540,8 +607,9 @@ TAGS.update(
     {
         "v1-first-greeting": (
             "v1-2. 티키와 첫인사",
-            "티키가 `자기소개해볼까?`로 시작해 별명·학년/나이·좋아하는 것·그 까닭·키우고 싶은 힘을 한 번에 하나씩 묻습니다. "
-            "모두 채우면 `READY_TO_FINISH`, 완료하면 프로필이 저장되고 `needsFirstGreeting` 이 false 가 됩니다.",
+            "동의 확인과 AI 사용 가능 조회 후 시작합니다. AI가 인사와 질문 순서를 생성하고 별명·학년대·관심사·까닭·성장 목표를 알아갑니다. "
+            "필수 항목을 채우고 AI가 확인을 제안하면 `READY_TO_FINISH`, 사용자 최종 확인 뒤 프로필을 저장합니다. "
+            "AI를 못 쓰면 503이며 규칙 대사로 대신하지 않습니다.",
         ),
         "v1-conversations": (
             "v1-3. 티키와 이야기",
@@ -555,10 +623,22 @@ TAGS.update(
 )
 OPERATIONS.update(
     {
+        ("GET", "/api/v1/first-greeting/readiness"): (
+            "첫인사 AI 사용 가능 여부",
+            "현재 사용자의 기본 아이에 대해 AI 동의·서버 설정을 검사합니다. "
+            "`{available: true, reason: null, message: null}`이면 현재 설정상 사용 가능합니다. "
+            "차단도 HTTP 200이며 `available: false`와 `reason`·안내 `message`를 반환합니다.\n\n"
+            "사유: `guest_consent_required`(게스트의 개인정보·AI 동의 중 하나 이상 없음), "
+            "`child_data_mode_off`(일반 계정의 demo 모드 제한), `no_api_key`, `ai_disabled`. "
+            "외부 AI 호출·대화 생성·사용량 소비는 하지 않습니다. 공급자 가용성, 일일·세션 한도까지 보장하는 검사는 아니며 "
+            "실제 첫인사 요청에서 다시 확인합니다.",
+            _V1C_TOKEN,
+        ),
         ("POST", "/api/v1/first-greeting/sessions"): (
             "첫인사 시작 또는 이어하기",
             "진행 중(`ACTIVE`·`READY_TO_FINISH`) 세션이 있으면 그 세션을 돌려주고(`resumed: true`), 없으면 새로 만듭니다. "
-            "첫 메시지는 `자기소개해볼까?`. `Idempotency-Key` 를 보내면 같은 응답을 다시 줍니다.\n\n" + _V1C_ERRORS,
+            "첫인사부터 AI가 생성합니다. AI를 사용할 수 없으면 503이며 규칙 대사를 만들지 않습니다. "
+            "`Idempotency-Key` 를 보내면 같은 성공 응답을 다시 줍니다.\n\n" + _V1C_ERRORS,
             _V1C_TOKEN,
         ),
         ("GET", "/api/v1/first-greeting/sessions/{session_id}"): (
@@ -569,15 +649,20 @@ OPERATIONS.update(
         ),
         ("POST", "/api/v1/first-greeting/sessions/{session_id}/messages"): (
             "첫인사 답변 보내기",
-            "아이 답에서 항목을 뽑고 부족한 항목 하나만 다음 질문으로 묻습니다. 같은 `clientMessageId` 는 저장하지 않고 처음 응답을 다시 줍니다.\n\n"
-            "- `endIntentDetected: true` + 준비 완료면 같은 요청에서 완료하고 `completion` 을 함께 줍니다\n"
-            "- 애매한 종료 표현이면 `SINGLE_CHOICE`(END·CONTINUE)로 확인합니다\n"
+            "AI가 최근 대화·맥락 요약·초안을 보고 답변과 정보 추가/정정/철회/보류를 함께 반환합니다. "
+            "서버는 발화를 다시 분석하지 않고 형식·출처·개인정보만 검사합니다. "
+            "같은 `clientMessageId` 는 저장하지 않고 처음 성공 응답을 다시 줍니다.\n\n"
+            "- 자연어 종료만으로 저장하지 않습니다. CONFIRM_PROFILE 버튼과 현재 questionId로 최종 확인합니다\n"
+            "- AI 장애/차단/출력 검증 실패는 503이며 초안과 메시지는 변경되지 않아 같은 ID로 재시도할 수 있습니다\n"
+            "- profileRevision은 프로필 변경 버전, deferredFields는 답변 보류 항목입니다\n"
             "- 안전하지 않은 입력은 `422 UNSAFE_CONTENT`(원문 저장 안 함), 지난 질문 id 는 `409 QUESTION_MISMATCH`",
             _V1C_TOKEN,
         ),
         ("POST", "/api/v1/first-greeting/sessions/{session_id}/complete"): (
             "첫인사 완료",
-            "프로필을 확정해 저장합니다. 부족하면 `409 FIRST_GREETING_NOT_READY` + `details.missing`. "
+            "`{trigger: BUTTON, profileRevision: 현재 버전}`으로 확인한 프로필을 저장합니다. "
+            "최신 AI 확인 제안이 없거나 버전이 다르면 409 PROFILE_REVIEW_REQUIRED. "
+            "부족하면 `409 FIRST_GREETING_NOT_READY` + `details.missing`. "
             "이미 완료된 세션은 처음 결과를 그대로 줍니다.",
             _V1C_TOKEN,
         ),
@@ -628,7 +713,11 @@ OPERATIONS.update(
         ),
         ("GET", "/api/v1/me"): (
             "내 정보",
-            "`user{id, role, needsFirstGreeting}` 와 첫인사로 확정한 `profile`(없으면 null).",
+            "`user{id, role, needsFirstGreeting}`, 완료된 기본 `profile`(첫인사 전 null), 접근 가능한 `profiles` 목록입니다. "
+            "처음 조회할 때 기본 아이의 빈 미완료 프로필과 소속을 준비합니다. "
+            "동의 등록에는 `profiles`에서 `isDefault: true`인 항목의 `id`를 사용하세요. "
+            "빈 프로필 생성만으로 첫인사를 완료 처리하지 않으며, 완료 시 같은 프로필에 내용을 채웁니다. "
+            "게스트는 예시 프로필이 완료 상태여도 첫인사를 이용할 수 있습니다.",
             _V1C_TOKEN,
         ),
         ("GET", "/api/v1/home"): (
@@ -656,7 +745,7 @@ EXAMPLES.update(
             "clientMessageId": "device-uuid-7",
             "input": {"type": "TEXT", "text": "나는 별이라고 불러 줘. 2학년이고 공룡을 좋아해."},
         },
-        ("POST", "/api/v1/first-greeting/sessions/{session_id}/complete"): {"trigger": "BUTTON"},
+        ("POST", "/api/v1/first-greeting/sessions/{session_id}/complete"): {"trigger": "BUTTON", "profileRevision": 1},
         ("POST", "/api/v1/conversations"): {"topicId": "topic_ice_cup", "inputMode": "TEXT", "locale": "ko-KR"},
         ("POST", "/api/v1/conversations/{conversation_id}/messages"): {
             "clientMessageId": "device-uuid-13",
@@ -1138,7 +1227,8 @@ TAGS.update(
         "v1-consents": (
             "v1-9. 고지·동의",
             "아이 개인정보·AI 대화·음성·공유 동의서(법률 검토 전 초안)와 동의 기록. 동의한 사람은 본문이 아니라 "
-            "로그인 계정에서 정합니다. AI 대화 동의가 있으면 demo 모드에서도 실제 AI 로 대화합니다.",
+            "로그인 계정에서 정합니다. 현재 AI 동의는 demo 모드 제한을 해제하지만 AI 키·스위치·사용량 제한은 유지됩니다. "
+            "게스트는 데이터 모드와 무관하게 개인정보·AI 두 동의가 모두 필요합니다.",
         ),
     }
 )
@@ -1213,23 +1303,33 @@ OPERATIONS.update(
             "동의서·고지 문서",
             "아이 개인정보(`privacy_child`)·AI 대화(`ai_conversation`)·음성(`voice_retention`)·공유(`community_share`). "
             "**법률 검토 전 초안**이며 `version` 은 개정일입니다.",
-            _V1A_TOKEN,
+            N,
         ),
         ("GET", "/api/v1/consents"): (
             "동의 기록 목록",
-            "`current: true` 면 지금 쓰는 문서 버전에 대한 살아 있는 동의입니다. 권한: VIEW_PROFILE.",
+            "`profileId`(생략 시 기본 프로필), `currentOnly`(기본 false), `cursor`·`limit`을 받습니다. "
+            "`current: true`는 현재 버전이고 철회되지 않은 동의입니다. `currentOnly=true`는 유효한 동의만 거른 뒤 페이지를 나눕니다. "
+            "권한: VIEW_PROFILE. 다른 계정의 프로필은 404입니다.",
             _V1A_TOKEN,
         ),
         ("POST", "/api/v1/consents"): (
             "동의하기",
             "목적이 다른 동의를 `items` 로 한 번에 기록합니다. 동의한 사람은 본문의 `actor` 가 아니라 로그인 계정에서 정합니다. "
             "`agreed: false` 는 이미 한 동의를 철회하고, 같은 버전에 이미 동의했으면 그 기록을 그대로 돌려줍니다. "
-            "권한: MANAGE_DATA.",
+            "권한: MANAGE_DATA. `Idempotency-Key`를 지원합니다.\n\n"
+            "게스트는 본인 프로필의 `privacy_child`, `ai_conversation`만 관리할 수 있습니다(다른 문서는 403 GUEST_RESTRICTED). "
+            "하나라도 `agreed: true`이면 `guardianConfirmed: true`가 필수이며 빠지면 403 GUARDIAN_CONFIRMATION_REQUIRED. "
+            "게스트 동의 등록에 문서 버전이 없으면 400 INVALID_INPUT, 구버전이면 409 VERSION_CONFLICT입니다. "
+            "일반 계정은 이 확인 값이 서버 필수는 아니지만 첫 로그인 화면에서 직접 확인을 받습니다. "
+            "동의 주체·역할·문서 버전·시각을 남기며 별도 보호자 본인인증을 수행하지 않습니다.",
             _V1A_TOKEN,
         ),
         ("DELETE", "/api/v1/consents/{consent_id}"): (
             "동의 철회",
-            "기록은 남기고 철회 시각만 적습니다. AI 대화 동의를 철회하면 바로 규칙 기반 대화로 돌아갑니다.",
+            "권한: MANAGE_DATA. 기록은 남기고 철회 시각만 적습니다. 남의 동의 기록은 404입니다. "
+            "게스트는 개인정보·AI 동의만 철회할 수 있습니다. 게스트의 두 동의 중 하나가 없으면 새 AI 요청이 차단됩니다. "
+            "첫인사는 AI 전용이므로 필요한 동의를 철회하면 새 AI 응답을 생성하지 않습니다. "
+            "기본 이야기 대화는 AI를 사용할 수 없을 때 준비된 대사로 이어집니다. 일반 계정의 AI 차단 여부에는 데이터 모드·테스터 설정도 적용됩니다.",
             _V1A_TOKEN,
         ),
     }
@@ -1247,8 +1347,11 @@ EXAMPLES.update(
         ("PATCH", "/api/v1/guardian-links/{link_id}"): {"permissions": ["VIEW_PROFILE", "VIEW_REPORTS"]},
         ("POST", "/api/v1/consents"): {
             "profileId": "prf_…",
-            "items": [{"documentId": "privacy_child", "version": "2026-09-18", "agreed": True}],
-            "actor": "GUARDIAN",
+            "items": [
+                {"documentId": "privacy_child", "version": "2026-09-18", "agreed": True},
+                {"documentId": "ai_conversation", "version": "2026-09-18", "agreed": True},
+            ],
+            "guardianConfirmed": True,
         },
     }
 )
@@ -1429,6 +1532,17 @@ OPERATIONS.update({
 })
 
 
+RESPONSE_EXAMPLES = {
+    ("GET", "/api/v1/first-greeting/readiness", "200"): {
+        "ready": {"summary": "현재 설정상 사용 가능", "value": {"available": True, "reason": None, "message": None}},
+        "consentRequired": {
+            "summary": "게스트 동의가 필요함 (HTTP 200)",
+            "value": {"available": False, "reason": "guest_consent_required", "message": "보호자가 개인정보와 AI 처리 동의를 확인해 주세요."},
+        },
+    },
+}
+
+
 def install(app: FastAPI) -> None:
     """생성된 스키마에 한국어 이름·설명·예시를 덧붙이는 openapi 함수로 바꾼다."""
 
@@ -1449,6 +1563,10 @@ def install(app: FastAPI) -> None:
                 op["tags"] = [TAGS.get(t, (t, ""))[0] for t in op.get("tags", [])]
                 if key in EXAMPLES and "application/json" in op.get("requestBody", {}).get("content", {}):
                     op["requestBody"]["content"]["application/json"]["example"] = EXAMPLES[key]
+                for status, response in op.get("responses", {}).items():
+                    examples = RESPONSE_EXAMPLES.get((*key, status))
+                    if examples and "application/json" in response.get("content", {}):
+                        response["content"]["application/json"]["examples"] = examples
         seen: dict[str, str] = {}
         for name, description in TAGS.values():
             if name not in seen or (description and not seen[name]):

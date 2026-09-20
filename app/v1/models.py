@@ -29,7 +29,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: prefixed_id("usr"))
-    role: Mapped[str] = mapped_column(String(12), default="CHILD")  # CHILD|GUARDIAN
+    role: Mapped[str] = mapped_column(String(12), default="CHILD")  # CHILD|GUARDIAN|GUEST
     status: Mapped[str] = mapped_column(String(12), default="ACTIVE")  # ACTIVE|DELETED
     family_id: Mapped[str] = mapped_column(ForeignKey("families.id"), index=True)
     child_id: Mapped[str] = mapped_column(ForeignKey("children.id"), index=True)
